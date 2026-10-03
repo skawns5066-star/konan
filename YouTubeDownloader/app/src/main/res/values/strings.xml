@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">유튜브 다운로더</string>
+    <string name="url_hint">유튜브 링크를 붙여넣으세요</string>
+    <string name="paste">붙여넣기</string>
+    <string name="btn_mp3">MP3 추출 (음원만)</string>
+    <string name="btn_mp4">MP4 추출 (동영상)</string>
+    <string name="btn_cancel">취소</string>
+    <string name="status_idle">링크를 입력하고 버튼을 눌러주세요.</string>
+    <string name="status_preparing">엔진 준비 중… (처음 실행 시 잠시 걸립니다)</string>
+    <string name="save_location">저장 위치: 내 파일 → 다운로드</string>
+</resources>
