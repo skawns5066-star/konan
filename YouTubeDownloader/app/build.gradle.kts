@@ -53,6 +53,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
 
     // yt-dlp(다운로드 엔진) + FFmpeg(MP3 변환/영상 합치기)를 안드로이드용으로 포장한 라이브러리
-    implementation("io.github.junkfood02.youtubedl-android:library:0.17.2")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 }

@@ -104,7 +104,7 @@ YouTubeDownloader/
 
 | 증상 | 해결 |
 |---|---|
-| Sync 실패 / 라이브러리를 못 찾음 | 인터넷 확인 후 *File → Sync Project with Gradle Files*. 그래도 안 되면 `app/build.gradle.kts`의 `0.17.2`를 [최신 버전](https://central.sonatype.com/artifact/io.github.junkfood02.youtubedl-android/library)으로 변경 |
+| Sync 실패 / 라이브러리를 못 찾음 | 인터넷 확인 후 *File → Sync Project with Gradle Files*. 그래도 안 되면 `app/build.gradle.kts`의 `0.18.1`를 [최신 버전](https://central.sonatype.com/artifact/io.github.junkfood02.youtubedl-android/library)으로 변경 |
 | 폰이 목록에 안 보임 | USB 케이블을 "데이터 전송" 가능한 것으로, 폰에서 USB 모드를 *파일 전송*으로 |
 | "엔진 준비 실패" | 앱 삭제 후 재설치. 인터넷 연결 확인 |
 | 다운로드 실패 (갑자기 안 됨) | 유튜브 변경 때문. 앱을 켜둔 채 인터넷 연결 → 시작 시 yt-dlp가 자동 업데이트됩니다. 앱을 껐다 다시 실행 |
