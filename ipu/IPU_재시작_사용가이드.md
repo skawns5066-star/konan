@@ -17,8 +17,16 @@
 
 ## 3. 메인 PC 준비 (한 번만)
 - Python 3.8 이상 설치 (폐쇄망이면 다른 PC에서 받은 설치 파일로 오프라인 설치, "Add python.exe to PATH" 체크). 추가 패키지는 필요 없습니다.
-- 메인 PC IP가 192.168.200.x 대역이고 IPU와 ping 되어야 합니다.
-- Windows 설정 변경은 **메인 PC에는 없습니다.** (방화벽 아웃바운드 기본 허용)
+- 메인 PC IP(192.168.0.21)와 IPU(192.168.200.x)는 **서브넷이 다릅니다.** 둘 사이에 라우팅이 없으면 ping/접속이 안 됩니다. 아래 둘 중 하나가 필요합니다.
+  - **방법 A (권장, 가장 간단): 메인 PC 관제망 NIC에 보조 IP 추가.** 관리자 cmd에서 (어댑터 이름은 `netsh interface show interface`로 확인, 예: "이더넷")
+    ```bat
+    netsh interface ip add address "이더넷" 192.168.200.21 255.255.255.0
+    ```
+    기존 192.168.0.21 설정은 그대로 유지되고, 게이트웨이는 넣지 않습니다. 제거: `netsh interface ip delete address "이더넷" 192.168.200.21`
+    (GUI: 어댑터 속성 → IPv4 → 고급 → IP 주소 추가)
+  - **방법 B: 라우터/L3 스위치로 192.168.0.0/24 ↔ 192.168.200.0/24 라우팅.** 이 경우 IPU 쪽에 게이트웨이가 설정돼 있어야 하고, 아래 4-2의 방화벽 규칙에 메인 PC 대역(192.168.0.0/24)을 허용해야 합니다(4-2 참고).
+- 확인: 메인 PC에서 `ping 192.168.200.11` 이 응답해야 다음 단계로 진행하세요.
+- 방법 A 적용 후에는 Windows 설정 변경이 메인 PC에는 더 없습니다. (방화벽 아웃바운드 기본 허용)
 
 ## 4. IPU 준비 (각 IPU에서 한 번만, 관리자 권한)
 이 부분이 가장 중요합니다. 비밀번호 없는 계정은 Windows가 기본으로 **네트워크 로그인을 차단**합니다.
@@ -48,6 +56,7 @@ sc config Schedule start= auto & net start Schedule
 sc config LanmanServer start= auto & net start LanmanServer
 sc config Winmgmt start= auto & net start Winmgmt
 ```
+- **방법 B(라우팅)를 쓰는 경우**: 기본 규칙은 "로컬 서브넷"만 허용하므로 다른 대역(192.168.0.x)은 막힙니다. 위 (3)의 각 규칙에 `remoteip=192.168.0.0/24` 를 추가하세요. 예: `netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes remoteip=192.168.0.0/24` (규칙 그룹마다 동일하게). 방법 A는 같은 서브넷이 되므로 필요 없습니다.
 - 한국어/영어 규칙 이름 중 맞지 않는 줄은 "일치하는 규칙 없음"이 나와도 정상입니다.
 - (1)을 GUI로 하려면: `secpol.msc` → 로컬 정책 → 보안 옵션 → **"계정: 로컬 계정의 빈 암호 사용을 콘솔 로그온만으로 제한"** → **사용 안 함**.
 - 변경 후 재부팅은 보통 필요 없지만, 접속이 안 되면 IPU를 한 번 재부팅하세요.
@@ -80,7 +89,7 @@ sc config Winmgmt start= auto & net start Winmgmt
 | 증상 | 원인 / 해결 |
 |---|---|
 | 접속 실패: 시스템 오류 1326 / 로그온 실패 | 계정명 오류, 또는 4-2 (1) 미적용. 계정명은 `ipu_config.json`의 `user` 확인 |
-| 시스템 오류 53 (네트워크 경로 없음) | ping 확인, 방화벽(SMB 445) 규칙 확인, IPU 전원/케이블 |
+| 시스템 오류 53 (네트워크 경로 없음) | ping 확인(메인 PC가 192.168.0.x 이므로 보조 IP 192.168.200.21 추가 여부 확인), 방화벽(SMB 445) 규칙 확인, IPU 전원/케이블 |
 | 시스템 오류 5 (액세스 거부) | Administrators 그룹 아닌 계정, 또는 4-2 (2) 미적용 |
 | 시스템 오류 1219 (다른 자격으로 이미 연결) | 메인 PC에서 `net use * /delete /y` 후 재실행 |
 | 종료 단계에서 RPC 서버 사용 불가 | WMI/원격 관리 방화벽 규칙(3), Winmgmt 서비스 확인 |
