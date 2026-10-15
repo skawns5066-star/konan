@@ -63,8 +63,16 @@ def run(cmd, timeout):
 def load_config(path):
     cfg = dict(DEFAULT_CONFIG)
     if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            cfg.update(json.load(f))
+        # utf-8-sig: 메모장이 붙이는 BOM 허용
+        with open(path, encoding="utf-8-sig") as f:
+            try:
+                cfg.update(json.load(f))
+            except ValueError as e:
+                log("설정 파일 형식 오류: %s (%s)" % (path, e))
+                log(r'경로의 \ 는 \\ 로 쓰고 따옴표는 한 겹만: "exe_path": "D:\\PxLauncherClient\\PxLauncherClient.exe"')
+                sys.exit(2)
+        # 경로를 따옴표로 한 번 더 감싸 넣은 경우 정리 (예약 작업 생성 시 자동으로 감쌈)
+        cfg["exe_path"] = cfg["exe_path"].strip().strip('"')
     else:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=2)
