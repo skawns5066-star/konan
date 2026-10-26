@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IPU 1~4 의 PxLauncherClient.exe 를 원격으로 종료 후 재시작한다.
+"""IPU 1~4(또는 5) 의 PxLauncherClient.exe 를 원격으로 종료 후 재시작한다.
 
 - 표준 라이브러리만 사용 (인터넷 불필요), Windows 기본 명령(net/taskkill/schtasks)만 호출
 - 종료: taskkill /S <ip> /F /IM
@@ -29,10 +29,10 @@ import sys
 import time
 from datetime import datetime
 
-# ipu1~4 의 IP 끝자리 (앞 3자리는 설정 파일의 ip_prefix)
-HOST_SUFFIX = {"ipu1": 11, "ipu2": 12, "ipu3": 13, "ipu4": 14}
+# ipuN 의 IP 끝자리 = 10 + N (앞 3자리는 설정 파일의 ip_prefix, 대수는 ipu_count)
 TARGETS = {}  # main() 에서 설정 파일의 ip_prefix 로 채움
 DEFAULT_CONFIG = {
+    "ipu_count": 4,                                  # 이 메인 PC 가 관리하는 IPU 대수 (4 또는 5)
     "ip_prefix": "192.168.200",                      # 메인 PC 별 IPU 대역 (예: 192.168.201 -> .11~.14)
     "user": "ipu",                                   # IPU 의 자동 로그인 계정 이름
     "password": "",                                  # 비밀번호 없는 계정이면 빈 문자열
@@ -213,7 +213,7 @@ def restart_one(name, ip, cfg, check_only=False):
 def main():
     global LOG_FILE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("targets", nargs="*", help="ipu1 ipu2 ipu3 ipu4 (생략 시 전체)")
+    ap.add_argument("targets", nargs="*", help="ipu1 ipu2 ... (생략 시 전체, 대수는 설정의 ipu_count)")
     ap.add_argument("--check", action="store_true", help="접속 점검만")
     ap.add_argument("--set-password", action="store_true", help="실행 비밀번호 설정/변경")
     ap.add_argument("--config", default=os.path.join(HERE, "ipu_config.json"))
@@ -226,8 +226,8 @@ def main():
 
     cfg = load_config(a.config)
     prefix = str(cfg["ip_prefix"]).strip().rstrip(".")
-    for n, last in HOST_SUFFIX.items():
-        TARGETS[n] = "%s.%d" % (prefix, last)
+    for i in range(1, int(cfg["ipu_count"]) + 1):
+        TARGETS["ipu%d" % i] = "%s.%d" % (prefix, 10 + i)
 
     names = [n.lower() for n in a.targets] or list(TARGETS)
     bad = [n for n in names if n not in TARGETS]

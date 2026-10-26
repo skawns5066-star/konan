@@ -126,3 +126,16 @@ schtasks /Query /S 192.168.200.11
 - 잊어버렸을 때: `ipu\ipu_auth.json` 파일을 지우면 다음 실행 때 새로 정합니다.
 - 비밀번호는 암호화(해시)되어 `ipu_auth.json`에 저장되며 git에는 올라가지 않습니다. 메인 PC마다 따로 정합니다.
 - 이 기능은 실수나 무분별한 실행을 막는 용도입니다. 파일을 직접 수정할 수 있는 사람까지 막지는 못하므로, 보안이 필요하면 메인 PC의 Windows 계정과 폴더 권한도 함께 관리하세요.
+
+## 9. IPU가 5대인 메인 PC
+
+`ipu_config.json`에 `"ipu_count": 5`를 넣으면 ipu5(끝자리 .15)가 추가됩니다. 생략하면 4대(기본값)입니다.
+
+```json
+{
+  "ipu_count": 5,
+  "ip_prefix": "192.168.203",
+  ...
+}
+```
+`ipu_restart.bat`(전체) 실행 시 ipu1~5 모두 처리되고, `ipu_restart.bat ipu5`처럼 선택도 됩니다. `ip_prefix`는 해당 PC의 IPU 대역 앞 3자리로 바꾸세요.
