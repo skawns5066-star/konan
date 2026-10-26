@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+ipu/ipu_auth.json
+ipu/ipu_config.json
+ipu/logs/

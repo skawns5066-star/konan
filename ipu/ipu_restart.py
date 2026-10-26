@@ -11,11 +11,19 @@
   python ipu_restart.py ipu1 ipu3       # 선택
   python ipu_restart.py --check         # 연결/권한만 점검 (종료/재시작 안 함)
   python ipu_restart.py --config my.json
+  python ipu_restart.py --set-password  # 실행 비밀번호 설정/변경
+
+실행 시 비밀번호를 묻는다. 처음 한 번은 새 비밀번호를 정하고, 이후엔 입력해야 실행된다.
+비밀번호(해시)는 ipu_auth.json 에 저장되며, 이 파일을 지우면 다음 실행 때 새로 정한다.
 """
 import argparse
 import csv
+import getpass
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -37,6 +45,53 @@ DEFAULT_CONFIG = {
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(HERE, "logs")
 LOG_FILE = None
+
+
+AUTH_FILE = os.path.join(HERE, "ipu_auth.json")
+
+
+def _hash(pw, salt):
+    return hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, 200000).hex()
+
+
+def _ask_new_password():
+    while True:
+        p1 = getpass.getpass("새 비밀번호: ")
+        if not p1:
+            print("빈 비밀번호는 사용할 수 없습니다.")
+            continue
+        if p1 != getpass.getpass("새 비밀번호 확인: "):
+            print("두 번 입력한 값이 다릅니다. 다시 입력하세요.")
+            continue
+        salt = secrets.token_bytes(16)
+        with open(AUTH_FILE, "w", encoding="utf-8") as f:
+            json.dump({"salt": salt.hex(), "hash": _hash(p1, salt)}, f)
+        print("비밀번호가 저장되었습니다.")
+        return
+
+
+def _check_password(max_tries=3):
+    with open(AUTH_FILE, encoding="utf-8") as f:
+        d = json.load(f)
+    salt, want = bytes.fromhex(d["salt"]), d["hash"]
+    for i in range(max_tries):
+        if hmac.compare_digest(_hash(getpass.getpass("비밀번호: "), salt), want):
+            return True
+        print("비밀번호가 틀렸습니다. (%d/%d)" % (i + 1, max_tries))
+    return False
+
+
+def authenticate(change=False):
+    """비밀번호 확인. 처음이면 설정. change=True 면 확인 후 새 비밀번호로 교체."""
+    if not os.path.exists(AUTH_FILE):
+        print("처음 실행입니다. 사용할 비밀번호를 정하세요.")
+        _ask_new_password()
+        return True
+    if not _check_password():
+        return False
+    if change:
+        _ask_new_password()
+    return True
 
 
 def log(msg):
@@ -160,8 +215,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("targets", nargs="*", help="ipu1 ipu2 ipu3 ipu4 (생략 시 전체)")
     ap.add_argument("--check", action="store_true", help="접속 점검만")
+    ap.add_argument("--set-password", action="store_true", help="실행 비밀번호 설정/변경")
     ap.add_argument("--config", default=os.path.join(HERE, "ipu_config.json"))
     a = ap.parse_args()
+
+    if not authenticate(change=a.set_password):
+        sys.exit("인증 실패: 실행하지 않고 종료합니다.")
+    if a.set_password:
+        return
 
     cfg = load_config(a.config)
     prefix = str(cfg["ip_prefix"]).strip().rstrip(".")
