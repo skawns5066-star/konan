@@ -13,6 +13,7 @@
   python ipu_restart.py --config my.json
 """
 import argparse
+import csv
 import json
 import os
 import subprocess
@@ -95,6 +96,25 @@ def is_running(ip, cfg):
     return rc == 0 and cfg["process_name"].lower() in out.lower(), out
 
 
+def get_pids(ip, cfg):
+    """실행 중인 프로세스의 PID 집합 (없으면 빈 집합, 조회 실패면 None)."""
+    rc, out = run(["tasklist", "/S", ip, "/FI", "IMAGENAME eq " + cfg["process_name"],
+                   "/FO", "CSV", "/NH"], cfg["timeout_sec"])
+    if rc != 0:
+        return None
+    pids = set()
+    for row in csv.reader(out.splitlines()):
+        if len(row) >= 2 and row[0].lower() == cfg["process_name"].lower() and row[1].isdigit():
+            pids.add(int(row[1]))
+    return pids
+
+
+def fmt_pids(pids):
+    if pids is None:
+        return "조회 실패"
+    return ", ".join(str(p) for p in sorted(pids)) or "없음(꺼져 있음)"
+
+
 def restart_one(name, ip, cfg, check_only=False):
     t = cfg["timeout_sec"]
     log("[%s] %s 연결 중..." % (name, ip))
@@ -102,8 +122,11 @@ def restart_one(name, ip, cfg, check_only=False):
     if rc != 0:
         return False, "접속 실패: %s" % out
     if check_only:
-        ok, out = is_running(ip, cfg)
-        return True, "접속 OK, %s 실행 중=%s" % (cfg["process_name"], ok)
+        return True, "접속 OK, %s PID: %s" % (cfg["process_name"], fmt_pids(get_pids(ip, cfg)))
+
+    # 0) 재시작 전 PID 기록
+    before = get_pids(ip, cfg)
+    log("[%s] 재시작 전 PID: %s" % (name, fmt_pids(before)))
 
     # 1) 종료
     rc, out = run(["taskkill", "/S", ip, "/F", "/IM", cfg["process_name"]], t)
@@ -124,10 +147,14 @@ def restart_one(name, ip, cfg, check_only=False):
 
     # 3) 검증
     time.sleep(cfg["verify_wait_sec"])
-    ok, out = is_running(ip, cfg)
-    if not ok:
-        return False, "재시작 명령은 보냈으나 프로세스가 보이지 않음 (exe_path 확인)"
-    return True, "재시작 확인됨"
+    after = get_pids(ip, cfg)
+    log("[%s] 재시작 후 PID: %s" % (name, fmt_pids(after)))
+    if not after:
+        return False, "재시작 명령은 보냈으나 프로세스가 보이지 않음 (exe_path 확인) / PID %s -> %s" % (
+            fmt_pids(before), fmt_pids(after))
+    if before and not (after - before):
+        return False, "PID 변경 없음 (%s) - 종료되지 않았거나 새로 켜지지 않음" % fmt_pids(after)
+    return True, "재시작 확인됨 / PID %s -> %s" % (fmt_pids(before), fmt_pids(after))
 
 
 def main():
