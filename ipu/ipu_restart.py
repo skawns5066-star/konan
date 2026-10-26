@@ -21,13 +21,11 @@ import sys
 import time
 from datetime import datetime
 
-TARGETS = {
-    "ipu1": "192.168.200.11",
-    "ipu2": "192.168.200.12",
-    "ipu3": "192.168.200.13",
-    "ipu4": "192.168.200.14",
-}
+# ipu1~4 의 IP 끝자리 (앞 3자리는 설정 파일의 ip_prefix)
+HOST_SUFFIX = {"ipu1": 11, "ipu2": 12, "ipu3": 13, "ipu4": 14}
+TARGETS = {}  # main() 에서 설정 파일의 ip_prefix 로 채움
 DEFAULT_CONFIG = {
+    "ip_prefix": "192.168.200",                      # 메인 PC 별 IPU 대역 (예: 192.168.201 -> .11~.14)
     "user": "ipu",                                   # IPU 의 자동 로그인 계정 이름
     "password": "",                                  # 비밀번호 없는 계정이면 빈 문자열
     "exe_path": r"C:\PxLauncher\PxLauncherClient.exe",  # IPU 안에서의 실제 경로로 수정
@@ -165,15 +163,19 @@ def main():
     ap.add_argument("--config", default=os.path.join(HERE, "ipu_config.json"))
     a = ap.parse_args()
 
+    cfg = load_config(a.config)
+    prefix = str(cfg["ip_prefix"]).strip().rstrip(".")
+    for n, last in HOST_SUFFIX.items():
+        TARGETS[n] = "%s.%d" % (prefix, last)
+
     names = [n.lower() for n in a.targets] or list(TARGETS)
     bad = [n for n in names if n not in TARGETS]
     if bad:
         sys.exit("알 수 없는 대상: %s (가능: %s)" % (", ".join(bad), ", ".join(TARGETS)))
-
-    cfg = load_config(a.config)
     os.makedirs(LOG_DIR, exist_ok=True)
     LOG_FILE = os.path.join(LOG_DIR, datetime.now().strftime("ipu_%Y%m%d_%H%M%S.log"))
-    log("대상: %s%s" % (", ".join(names), " (점검 모드)" if a.check else ""))
+    log("대상: %s%s" % (", ".join("%s(%s)" % (n, TARGETS[n]) for n in names),
+                      " (점검 모드)" if a.check else ""))
 
     results = {}
     for n in names:
