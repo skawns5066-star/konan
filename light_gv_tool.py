@@ -10,8 +10,10 @@ import tkinter as tk
 from tkinter import filedialog, font as tkfont, ttk
 
 import light_spec_core as core
+import i18n
 from i18n import LANGS, FONT_CANDIDATES, get_lang, set_lang, t
 
+VERSION = "2026.10.29-3"
 KIND_TITLE = {"BT": "BT (Strip)", "ABF": "ABF (Unit)"}
 DEFAULT_FONT_SIZE = 18      # 기존(9pt)의 2배
 MIN_FONT, MAX_FONT = 10, 36
@@ -99,7 +101,7 @@ class App(tk.Tk):
         self.presets = core.load_presets()
         self.cfg = core.load_config()
         set_lang(self.cfg.get("lang", "ko"))
-        self.title(t("app_title"))
+        self.set_title()
         self.setup_window()
         self.setup_fonts()
         self.cfg.setdefault("targets", {})
@@ -122,6 +124,19 @@ class App(tk.Tk):
         self.container = ttk.Frame(self)
         self.container.pack(fill="both", expand=True)
         self.show_main()
+        self.after(300, self.check_versions)
+
+    def set_title(self):
+        self.title(f"{t('app_title')}   [v{VERSION}]")
+
+    def check_versions(self):
+        """프로그램 파일 일부만 새것으로 복사된 경우를 바로 알려준다."""
+        if len({VERSION, core.VERSION, getattr(i18n, "VERSION", "?")}) > 1:
+            self.error("Version", f"light_gv_tool.py: {VERSION}\nlight_spec_core.py: {core.VERSION}\n"
+                       f"i18n.py: {getattr(i18n, 'VERSION', '?')}\n\n"
+                       "파일 버전이 서로 다릅니다. 5개 파일을 모두 새로 복사하세요.\n"
+                       "檔案版本不一致，請重新複製全部 5 個檔案。\n"
+                       "Các tệp có phiên bản khác nhau. Hãy sao chép lại cả 5 tệp.")
 
     # ------------------------------------------------------------ 창 / 글꼴
     def setup_window(self):
@@ -158,7 +173,7 @@ class App(tk.Tk):
     def change_lang(self):
         set_lang(self.lang_var.get())
         self.cfg["lang"] = get_lang()
-        self.title(t("app_title"))
+        self.set_title()
         self.apply_fonts()
         core.save_config(self.cfg)
         self.show_main()

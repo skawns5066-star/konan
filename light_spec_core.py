@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+VERSION = "2026.10.29-3"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
