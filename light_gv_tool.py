@@ -400,7 +400,7 @@ class App(tk.Tk):
         hsb.grid(row=1, column=0, sticky="ew")
         self.bind_all("<MouseWheel>", lambda e: canvas.winfo_exists() and canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
 
-        cols = [t(k) for k in ("c_light", "c_param", "c_ratio", "c_material", "c_target", "c_cur", "c_result")] + ["", t("c_fix")]
+        cols = [t(k) for k in ("c_light", "c_param", "c_ratio", "c_material", "c_target", "c_cur", "c_result")] + [""]
         for c, txt in enumerate(cols):
             ttk.Label(grid, text=txt, font=self.f_bold).grid(row=0, column=c, padx=8, pady=6)
 
@@ -460,12 +460,15 @@ class App(tk.Tk):
             e.set_material(cb.get())
             tvar.set(str(int(e.target)))
 
+        next_row = 1
         for i, e in enumerate(entries, start=1):
-            ttk.Label(grid, text=self.label_of(e)).grid(row=i, column=0, padx=8, pady=5, sticky="w")
-            ttk.Label(grid, text=e.param_text()).grid(row=i, column=1, padx=8, sticky="w")
+            r = next_row
+            next_row += 1
+            ttk.Label(grid, text=self.label_of(e)).grid(row=r, column=0, padx=8, pady=5, sticky="w")
+            ttk.Label(grid, text=e.param_text()).grid(row=r, column=1, padx=8, sticky="w")
             match = e.ratio_matches()
             ttk.Label(grid, text=e.ratio_text() + ("" if match is None else (" ✓" if match else " ⚠")),
-                      foreground="#c07000" if match is False else "#000000").grid(row=i, column=2, padx=8)
+                      foreground="#c07000" if match is False else "#000000").grid(row=r, column=2, padx=8)
             tvar = tk.StringVar(value=str(int(e.target)))
             gvar = tk.StringVar()
             idx = i - 1
@@ -474,27 +477,28 @@ class App(tk.Tk):
                 lock_widgets.append((cb, "readonly"))
                 cb.set(e.material)
                 cb.bind("<<ComboboxSelected>>", lambda ev, k=idx, c=cb: pick_material(k, c))
-                cb.grid(row=i, column=3, padx=6)
+                cb.grid(row=r, column=3, padx=6)
             else:
-                ttk.Label(grid, text=e.material or "-").grid(row=i, column=3, padx=6)
+                ttk.Label(grid, text=e.material or "-").grid(row=r, column=3, padx=6)
             te = ttk.Entry(grid, textvariable=tvar, width=6, justify="center", state="disabled")
-            te.grid(row=i, column=4, padx=6)
+            te.grid(row=r, column=4, padx=6)
             lock_widgets.append((te, "normal"))
             gve = ttk.Entry(grid, textvariable=gvar, width=6, justify="center")
-            gve.grid(row=i, column=5, padx=6)
+            gve.grid(row=r, column=5, padx=6)
             lbl = ttk.Label(grid, text=t("st_blank"), width=18)
-            lbl.grid(row=i, column=6, padx=8)
-            ttk.Button(grid, text="OK", width=5, command=lambda k=idx: manual_ok(k)).grid(row=i, column=7, padx=6)
+            lbl.grid(row=r, column=6, padx=8)
+            ttk.Button(grid, text="OK", width=5, command=lambda k=idx: manual_ok(k)).grid(row=r, column=7, padx=6)
             bad = e.mismatches()
-            if bad:
-                ttk.Label(grid, text=t("mm_flag"), foreground="#c00000").grid(row=i, column=0, sticky="e")
-                box = ttk.Frame(grid)
-                box.grid(row=i, column=8, padx=8, sticky="w")
+            if bad:     # 좌/우 값이 다른 항목: 줄 바로 아래에 (화면 밖으로 밀리지 않게) 빨간 입력칸을 만든다
+                warn_row = tk.Frame(grid, bg="#ffe3e3", padx=10, pady=4)
+                warn_row.grid(row=next_row, column=0, columnspan=8, sticky="we", padx=4, pady=(0, 6))
+                next_row += 1
+                tk.Label(warn_row, text=t("mm_flag"), bg="#ffe3e3", fg="#c00000", font=self.f_bold).pack(side="left")
                 for k, vals in bad.items():
                     v = tk.StringVar()
                     fix_vars[(idx, k)] = v
-                    ttk.Label(box, text=f"{k[0]}{k[1:]}° ({'/'.join(str(x) for x in vals)}) →", foreground="#c00000").pack(side="left")
-                    ttk.Entry(box, textvariable=v, width=5, justify="center").pack(side="left", padx=(4, 10))
+                    tk.Label(warn_row, text=f"  {k[0]}{k[1:]}° ({'/'.join(str(x) for x in vals)}) →", bg="#ffe3e3", fg="#c00000").pack(side="left")
+                    tk.Entry(warn_row, textvariable=v, width=6, justify="center", bd=2, relief="solid").pack(side="left", padx=(4, 12))
             rows.append((e, tvar, gvar, lbl, gve))
             gvar.trace_add("write", lambda *_, k=idx: on_gv(k))
             tvar.trace_add("write", lambda *_, k=idx: refresh(k))

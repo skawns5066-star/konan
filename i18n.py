@@ -69,12 +69,12 @@ TEXT = {
     # 좌/우 불일치
     "mm_title": ("좌/우 파라미터 불일치", "左／右參數不一致", "Tham số trái/phải không khớp"),
     "mm_msg": ("같은 각도의 좌/우 채널 값이 달라 파일 파라미터가 잘못되어 있습니다 ({n}건).\n{lines}\n\n"
-               "표의 '좌/우 불일치 수정' 칸에 올바른 값을 입력하고 저장하면 파일이 함께 수정됩니다.",
+               "표에서 해당 줄 바로 아래의 빨간 입력칸에 올바른 값을 입력하고 저장하면 파일이 함께 수정됩니다.",
                "同一角度的左、右通道數值不同，檔案中的參數有誤（共 {n} 筆）。\n{lines}\n\n"
-               "請在表格的「左／右不一致修正」欄輸入正確的數值，儲存後檔案會一併修正。",
+               "請在表格中該列正下方的紅色輸入欄輸入正確的數值，儲存後檔案會一併修正。",
                "Giá trị kênh trái và phải ở cùng một góc đang khác nhau, tham số trong tệp bị sai ({n} mục).\n{lines}\n\n"
-               "Hãy nhập giá trị đúng vào cột 'Sửa lệch trái/phải' trong bảng; khi lưu, tệp sẽ được sửa theo."),
-    "mm_flag": ("⚠ 좌/우 불일치", "⚠ 左／右不一致", "⚠ Lệch trái/phải"),
+               "Hãy nhập giá trị đúng vào ô màu đỏ ngay bên dưới dòng đó trong bảng; khi lưu, tệp sẽ được sửa theo."),
+    "mm_flag": ("⚠ 좌/우 불일치 — 올바른 값 입력:", "⚠ 左／右不一致 — 請輸入正確數值：", "⚠ Lệch trái/phải — nhập giá trị đúng:"),
     # 표 화면
     "back_btn": ("← 취소(메인)", "← 取消（回主畫面）", "← Hủy (về màn hình chính)"),
     "table_title": ("  {model} / {name}   —   {file}   —   허용 오차 ±{tol}",

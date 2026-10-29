@@ -19,7 +19,6 @@ from pathlib import Path
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
-MAX_STEP = 3.0          # 1회 보정에서 파라미터를 바꿀 수 있는 최대 배율(과보정 방지)
 MAX_VALUE = 1024        # 샘플 XML에서 확인되는 Value 최대값
 MIN_EXPONENT = 0.25     # 포화되는 조명에서 지수가 0에 가까워 폭주하는 것을 방지
 
@@ -202,7 +201,6 @@ def calc_new_value(cur_param, cur_gv, target, exponent):
     if cur_param <= 0:   # 0이면 비율 계산 불가 -> 상승 시 1부터 시작
         return 1 if target > cur_gv else 0
     ratio = (target / cur_gv) ** (1.0 / exponent)
-    ratio = min(max(ratio, 1.0 / MAX_STEP), MAX_STEP)
     exact = cur_param * ratio
 
     def predicted(p):

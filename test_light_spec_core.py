@@ -55,7 +55,8 @@ def test_ratio_not_additive():
     assert 4 < small <= 5 and 300 < large < 340
     assert core.calc_new_value(100, 200, 150, 0.5) < 100
     assert core.calc_new_value(100, 150, 150, 0.5) == 100
-    assert core.calc_new_value(100, 100, 400, 0.5) == 300
+    assert core.calc_new_value(100, 100, 400, 0.5) == 1024      # 배율 제한 없음(필요하면 크게), 상한은 Value 최대 1024
+    assert core.calc_new_value(100, 100, 200, 0.5) == 400       # 3배를 넘는 보정도 그대로 계산
     assert core.calc_new_value(0, 50, 150, 0.5) == 1
     assert core.calc_new_value(900, 50, 255, 0.5) == core.MAX_VALUE
 
