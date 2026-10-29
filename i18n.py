@@ -2,7 +2,7 @@
 
 t("키", 이름=값, ...) 로 현재 언어의 문구를 가져온다. 새 문구는 TEXT 에 세 언어를 함께 추가한다.
 """
-VERSION = "2026.10.29-3"
+VERSION = "2026.10.29-4"
 LANGS = {"ko": "한국어", "zh": "繁體中文", "vi": "Tiếng Việt"}
 _lang = "ko"
 
@@ -76,6 +76,16 @@ TEXT = {
                "Giá trị kênh trái và phải ở cùng một góc đang khác nhau, tham số trong tệp bị sai ({n} mục).\n{lines}\n\n"
                "Hãy nhập giá trị đúng vào ô màu đỏ ngay bên dưới dòng đó trong bảng; khi lưu, tệp sẽ được sửa theo."),
     "mm_flag": ("⚠ 좌/우 불일치 — 올바른 값 입력:", "⚠ 左／右不一致 — 請輸入正確數值：", "⚠ Lệch trái/phải — nhập giá trị đúng:"),
+    "rt_flag": ("⚠ 비율 불일치 (규격 {ratio}) — 권장값이 채워져 있습니다. 그대로 저장하면 수정됩니다:",
+                "⚠ 比例不符（規格 {ratio}）— 已填入建議值，直接儲存即會修正：",
+                "⚠ Sai tỷ lệ (quy cách {ratio}) — đã điền sẵn giá trị đề xuất, lưu là sẽ được sửa:"),
+    "rt_title": ("비율 불일치", "比例不符", "Sai tỷ lệ"),
+    "rt_msg": ("현재 값이 규격 비율과 달라 아래 항목에 권장값을 채워 두었습니다 ({n}건).\n{lines}\n\n"
+               "그대로 저장하면 권장값으로 수정되고, 원하지 않으면 입력칸을 지우세요. 값을 직접 바꿔 입력해도 됩니다.",
+               "目前數值與規格比例不符，已在下列項目填入建議值（共 {n} 筆）。\n{lines}\n\n"
+               "直接儲存即會改為建議值；若不想修改，請清空輸入欄，也可以自行輸入其他數值。",
+               "Giá trị hiện tại không đúng tỷ lệ quy cách, đã điền sẵn giá trị đề xuất cho các mục sau ({n} mục).\n{lines}\n\n"
+               "Lưu ngay sẽ sửa theo giá trị đề xuất; nếu không muốn, hãy xóa ô nhập. Bạn cũng có thể tự nhập giá trị khác."),
     # 표 화면
     "back_btn": ("← 취소(메인)", "← 取消（回主畫面）", "← Hủy (về màn hình chính)"),
     "table_title": ("  {model} / {name}   —   {file}   —   허용 오차 ±{tol}",
@@ -101,18 +111,18 @@ TEXT = {
     # 저장
     "save_title": ("저장", "儲存", "Lưu"),
     "input_err": ("입력 오류", "輸入錯誤", "Lỗi nhập liệu"),
-    "err_range": ("좌/우 불일치 수정값은 0~{max} 정수여야 합니다. ({label} {key})",
-                  "左／右不一致的修正值必須是 0～{max} 的整數。（{label} {key}）",
-                  "Giá trị sửa lệch trái/phải phải là số nguyên từ 0 đến {max}. ({label} {key})"),
+    "err_range": ("수정값은 0~{max} 정수여야 합니다. ({label} {key})",
+                  "修正值必須是 0～{max} 的整數。（{label} {key}）",
+                  "Giá trị sửa phải là số nguyên từ 0 đến {max}. ({label} {key})"),
     "need_fix_values": ("좌/우 불일치 값을 입력해야 해당 항목을 수정할 수 있습니다.",
                         "必須輸入左／右不一致的修正值，才能修改該項目。",
                         "Cần nhập giá trị sửa lệch trái/phải thì mới sửa được mục này."),
     "nothing_to_fix": ("보정할 항목이 없습니다. 메인 화면으로 돌아갈까요?",
                        "沒有需要校正的項目。要回到主畫面嗎？",
                        "Không có mục nào cần hiệu chỉnh. Quay về màn hình chính?"),
-    "msg_fixes": ("좌/우 불일치 {n}건을 입력한 값으로 통일합니다.\n(해당 항목의 GV 보정은 파일 수정 후 재측정하여 다시 진행)\n",
-                  "將左／右不一致的 {n} 筆統一為您輸入的數值。\n（這些項目的 GV 校正，請在檔案修改後重新量測再進行）\n",
-                  "Sẽ thống nhất {n} mục lệch trái/phải theo giá trị bạn nhập.\n(Hiệu chỉnh GV của các mục này: hãy đo lại sau khi sửa tệp rồi thực hiện)\n"),
+    "msg_fixes": ("{n}건의 값을 입력/권장한 값으로 수정합니다. (좌/우 통일, 비율 맞춤)\n(해당 항목의 GV 보정은 파일 수정 후 재측정하여 다시 진행)\n",
+                  "將 {n} 筆數值修改為您輸入／建議的數值。（左右統一、比例對齊）\n（這些項目的 GV 校正，請在檔案修改後重新量測再進行）\n",
+                  "Sẽ sửa {n} giá trị theo giá trị bạn nhập/đề xuất. (thống nhất trái/phải, căn tỷ lệ)\n(Hiệu chỉnh GV của các mục này: hãy đo lại sau khi sửa tệp rồi thực hiện)\n"),
     "msg_pending": ("{n}개 항목을 GV 기준으로 보정합니다.\n", "將依 GV 校正 {n} 個項目。\n",
                     "Sẽ hiệu chỉnh {n} mục theo GV.\n"),
     "msg_blank": ("GV 미입력 {n}개 항목은 변경하지 않습니다.\n", "尚未輸入 GV 的 {n} 個項目不會變更。\n",
@@ -120,9 +130,9 @@ TEXT = {
     "msg_unresolved": ("⚠ 값을 입력하지 않은 불일치 {n}건은 수정하지 않습니다.\n",
                        "⚠ 未輸入修正值的不一致 {n} 筆不會修改。\n",
                        "⚠ {n} mục lệch chưa nhập giá trị sẽ không được sửa.\n"),
-    "msg_skipped": ("⚠ 불일치 항목 {n}개는 값 통일 전이라 GV 보정에서 제외됩니다.\n",
-                    "⚠ 不一致的 {n} 個項目尚未統一數值，將不進行 GV 校正。\n",
-                    "⚠ {n} mục lệch chưa được thống nhất giá trị nên không hiệu chỉnh GV.\n"),
+    "msg_skipped": ("⚠ 값을 수정하거나 아직 불일치인 항목 {n}개는 GV 보정에서 제외됩니다 (수정 후 재측정).\n",
+                    "⚠ 需修改數值或仍不一致的 {n} 個項目，將不進行 GV 校正（修改後請重新量測）。\n",
+                    "⚠ {n} mục cần sửa giá trị hoặc còn lệch sẽ không hiệu chỉnh GV (hãy đo lại sau khi sửa).\n"),
     "msg_backup": ("백업: {yn}\n계속할까요?", "備份：{yn}\n要繼續嗎？", "Sao lưu: {yn}\nTiếp tục?"),
     "backup_yes": ("함", "是", "Có"),
     "backup_no": ("안 함", "否", "Không"),

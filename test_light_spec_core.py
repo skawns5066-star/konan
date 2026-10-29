@@ -171,3 +171,34 @@ def test_spec_file_error_is_translatable():
         assert False
     except core.SpecFileError as ex:
         assert ex.key == "err_model_dir" and "d" in ex.params and isinstance(ex, FileNotFoundError)
+
+
+def _bt_with_bad_ratio():
+    """샘플의 2호 R(R0=1, R30=4 → 규격 1:4)을 R0=4, R30=12(1:3)로 바꾼 복사본."""
+    p = tmp_copy(BT)
+    pf = core.parse_file(p)
+    e = next(x for x in core.build_entries("BT", pf, P["BT_TOP"]) if (x.page, x.gid) == (1, "R"))
+    for r in e.rows:
+        r.new_value = 4 if r.angle == 0 else 12
+    core.save_file(pf, False)
+    return p
+
+
+def test_ratio_suggestion_and_fix():
+    p = _bt_with_bad_ratio()
+    pf = core.parse_file(p)
+    es = core.build_entries("BT", pf, P["BT_TOP"])
+    e = next(x for x in es if (x.page, x.gid) == (1, "R"))
+    assert e.ratio_matches() is False and e.ratio_suggestions() == {"R30": 16}      # 12 -> 16 유도
+    assert core.apply_fixes(e, {"R30": 16}) == 1 and e.fixed
+    assert core.apply_fixes(e, {"R0": 99}) == 0                                       # 기준(1) 채널은 권장 대상이 아님
+    core.save_file(pf, False)
+    again = next(x for x in core.build_entries("BT", core.parse_file(p), P["BT_TOP"]) if (x.page, x.gid) == (1, "R"))
+    assert again.ratio_matches() and again.ratio_suggestions() == {}
+    assert [r.value for r in again.rows_of("R30")] == [16, 16]                        # 좌/우 둘 다 수정
+
+
+def test_ratio_suggestion_waits_for_left_right_fix():
+    es = core.build_entries("BT", core.parse_file(BT), P["BT_TOP"])
+    e = next(x for x in es if (x.page, x.gid) == (2, "R"))        # 120/210 불일치
+    assert e.mismatches() and e.ratio_suggestions() == {}

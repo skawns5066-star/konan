@@ -13,7 +13,7 @@ import light_spec_core as core
 import i18n
 from i18n import LANGS, FONT_CANDIDATES, get_lang, set_lang, t
 
-VERSION = "2026.10.29-3"
+VERSION = "2026.10.29-4"
 KIND_TITLE = {"BT": "BT (Strip)", "ABF": "ABF (Unit)"}
 DEFAULT_FONT_SIZE = 18      # 기존(9pt)의 2배
 MIN_FONT, MAX_FONT = 10, 36
@@ -385,6 +385,10 @@ class App(tk.Tk):
         if bad:
             lines = "\n".join(f"  · {self.label_of(e)}  {k[0]}{k[1:]}°: {' / '.join(str(x) for x in v)}" for e, k, v in bad)
             self.warn(t("mm_title"), t("mm_msg", n=len(bad), lines=lines))
+        rat = [(e, k, v) for e in entries for k, v in e.ratio_suggestions().items()]
+        if rat:
+            lines = "\n".join(f"  · {self.label_of(e)}  {k[0]}{k[1:]}°: {e.rows_of(k)[0].value} → {v}" for e, k, v in rat)
+            self.warn(t("rt_title"), t("rt_msg", n=len(rat), lines=lines))
         self.show_table(kind, item["name"], parsed, entries, prefix)
 
     # ------------------------------------------------------------ 2. 파라미터/GV 표
@@ -514,6 +518,18 @@ class App(tk.Tk):
                     fix_vars[(idx, k)] = v
                     tk.Label(warn_row, text=f"  {k[0]}{k[1:]}° ({'/'.join(str(x) for x in vals)}) →", bg="#ffe3e3", fg="#c00000").pack(side="left")
                     tk.Entry(warn_row, textvariable=v, width=6, justify="center", bd=2, relief="solid").pack(side="left", padx=(4, 12))
+            sug = e.ratio_suggestions()
+            if sug:     # 비율이 규격과 다름: 권장값을 미리 채운 노란 입력칸 (그대로 저장하면 적용)
+                bg, fg = "#fff1c9", "#9a5200"
+                rt_row = tk.Frame(grid, bg=bg, padx=10, pady=4)
+                rt_row.grid(row=next_row, column=0, columnspan=8, sticky="we", padx=4, pady=(0, 6))
+                next_row += 1
+                tk.Label(rt_row, text=t("rt_flag", ratio=e.ratio_text()), bg=bg, fg=fg, font=self.f_bold).pack(side="left")
+                for k, want in sug.items():
+                    v = tk.StringVar(value=str(want))
+                    fix_vars[(idx, k)] = v
+                    tk.Label(rt_row, text=f"  {k[0]}{k[1:]}° ({e.rows_of(k)[0].value}) →", bg=bg, fg=fg).pack(side="left")
+                    tk.Entry(rt_row, textvariable=v, width=6, justify="center", bd=2, relief="solid").pack(side="left", padx=(4, 12))
             rows.append((e, tvar, gvar, lbl, gve))
             gvar.trace_add("write", lambda *_, k=idx: on_gv(k))
             tvar.trace_add("write", lambda *_, k=idx: refresh(k))
@@ -545,9 +561,9 @@ class App(tk.Tk):
         unresolved = [(e, k) for i, e in enumerate(entries) for k in e.mismatches() if k not in fixes.get(i, {})]
         for e in entries:
             self.cfg["targets"][prefix + e.key] = e.target
-        pending = [e for e in entries if not e.ok and e.cur_gv is not None and not e.mismatches()]
-        blank = [e for e in entries if not e.ok and e.cur_gv is None and not e.mismatches()]
-        skipped = [e for e in entries if e.mismatches() and not e.ok and e.cur_gv is not None]
+        pending = [e for i, e in enumerate(entries) if i not in fixes and not e.ok and e.cur_gv is not None and not e.mismatches()]
+        blank = [e for i, e in enumerate(entries) if i not in fixes and not e.ok and e.cur_gv is None and not e.mismatches()]
+        skipped = [e for i, e in enumerate(entries) if (i in fixes or e.mismatches()) and not e.ok and e.cur_gv is not None]
         if not pending and not fixes:
             if unresolved:
                 self.warn(t("save_title"), t("need_fix_values"))
@@ -571,7 +587,7 @@ class App(tk.Tk):
         msg += t("msg_backup", yn=t("backup_yes") if self.backup.get() else t("backup_no"))
         if not self.ask_yes_no(t("confirm_title"), msg):
             return
-        core.apply_corrections(entries, self.exponents, self.align.get())
+        core.apply_corrections([e for i, e in enumerate(entries) if i not in fixes], self.exponents, self.align.get())
         for idx, fx in fixes.items():
             core.apply_fixes(entries[idx], fx)
         try:

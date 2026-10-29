@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "2026.10.29-3"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
+VERSION = "2026.10.29-4"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
@@ -318,6 +318,26 @@ class Entry:
                     return False
         return True
 
+    def ratio_suggestions(self, tol=0.08):
+        """비율이 규격과 다를 때 맞추기 위한 권장값 {키: 값}. 기준(비율 1) 채널은 그대로 두고 나머지를 맞춘다.
+
+        좌/우 값이 다르면(먼저 통일해야 하므로) 규격 비율이 없거나 이미 맞으면 빈 dict.
+        """
+        if self.mismatches() or not self.ratio_usable() or self.ratio_matches():
+            return {}
+        anchor = self.anchor_key()
+        a = self.rows_of(anchor)[0].value
+        if a <= 0:
+            return {}
+        out = {}
+        for k in self.keys():
+            if k == anchor:
+                continue
+            want = a * self.ratio[k] / self.ratio[anchor]
+            if abs(self.rows_of(k)[0].value - want) > max(1.0, want * tol):
+                out[k] = min(MAX_VALUE, max(0, round(want)))
+        return out
+
     def anchor_key(self):
         """비율이 가장 작은 키 = 기준(1) 채널."""
         ks = self.keys()
@@ -366,13 +386,14 @@ def build_entries(kind, parsed, preset=None, saved_targets=None, default_target=
 
 
 def apply_fixes(entry, fixes):
-    """좌/우 불일치 수정. fixes = {키(예 'R30'): 통일할 값}. 적용한 키 수를 반환.
+    """값 직접 수정: 좌/우 불일치 통일 + 규격 비율 맞춤. fixes = {키(예 'R30'): 새 값}. 적용한 키 수를 반환.
 
     값이 바뀌는 채널만 new_value 를 채운다. 파일 값이 바뀌므로 이 항목의 GV 보정은 재측정 후로 미룬다.
     """
     n = 0
+    valid = set(entry.mismatches()) | set(entry.ratio_suggestions())
     for k, v in fixes.items():
-        if not 0 <= v <= MAX_VALUE or k not in entry.mismatches():
+        if not 0 <= v <= MAX_VALUE or k not in valid:
             continue
         for r in entry.rows_of(k):
             r.new_value = int(v) if r.value != v else None
