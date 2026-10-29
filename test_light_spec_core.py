@@ -7,28 +7,46 @@ import light_spec_core as core
 HERE = os.path.dirname(os.path.abspath(__file__))
 BT = os.path.join(HERE, "samples", "LightSpec-bt.xml")
 ABF = os.path.join(HERE, "samples", "LightSpec-ABF.xml")
+P = core.load_presets()
 
 
 def tmp_copy(src):
-    d = tempfile.mkdtemp()
-    return shutil.copy(src, d)
+    return shutil.copy(src, tempfile.mkdtemp())
 
 
-def test_bt_groups_left_right_and_enable():
-    es = core.build_entries("BT", core.parse_file(BT))
-    got = [(e.page, e.angle, e.ref.color, e.param(e.ref.color), len(e.rows)) for e in es]
-    assert (0, 0, "W", "40", 1) in got and (0, 30, "W", "120", 2) in got     # 30° 좌/우 2채널 = 1항목
-    assert (1, 0, "R", "1", 1) in got and (1, 60, "G", "175", 2) in got
-    assert (2, 60, "R", "120/210", 2) in got                                  # 좌/우 값이 다르면 둘 다 표시
-    assert not any(e.page == 1 and e.ref.color == "W" for e in es)            # Enable=0 제외
-    assert len(es) == 15
+def bt_entries(preset="BT_TOP"):
+    return core.build_entries("BT", core.parse_file(BT), P[preset])
 
 
-def test_abf_page_disabled_and_rgb_group():
-    es = core.build_entries("ABF", core.parse_file(ABF))
-    assert not any(e.page == 2 for e in es)                                   # Page 2 Enable=0
-    assert [(e.page, e.angle) for e in es] == [(0, 0), (0, 30), (0, 60), (1, 30), (1, 60), (1, 75)]
-    assert es[1].param("W") == "105" and len(es[1].rows) == 2
+def test_presets_cover_four_areas():
+    assert set(P) >= {"BT_TOP", "BT_BOTTOM", "ABF_TOP", "ABF_BOTTOM"}
+    assert P["BT_TOP"]["lights"]["2"]["groups"][0]["targets"] == {"AU": 195}      # '190~195' -> 큰 값
+    assert P["BT_BOTTOM"]["lights"]["2"]["groups"][0]["targets"]["AU"] == 255     # '255+'
+    assert P["ABF_TOP"]["lights"]["2"]["groups"][0]["targets"] == {"SR": 105}     # Green 기준
+
+
+def test_bt_entries_follow_preset_and_file_ratio():
+    es = {(e.page, e.gid): e for e in bt_entries()}
+    assert len(es) == 7                      # 1번 W / 2번 R,G,B / 3번 R,G,B
+    e = es[(1, "G")]
+    assert e.keys() == ["G30", "G60"] and e.ratio_text() == "1:5" and e.param_text() == "G30°=35 · G60°=175"
+    assert e.target == 185 and e.ratio_matches()
+    assert es[(2, "R")].param_text() == "R0°=480 · R60°=120/210" and not es[(2, "R")].ratio_matches()
+    assert es[(0, "R")].keys() == ["W0", "W30", "W60"] and es[(0, "R")].ratio_matches()   # BT 1번 = W, 1:3:3
+
+
+def test_material_changes_target():
+    e = bt_entries("BT_BOTTOM")[1]
+    assert e.targets == {"AU": 255, "OSP": 195} and e.target == 255
+    e.set_material("OSP")
+    assert e.target == 195
+
+
+def test_abf_one_entry_per_light_page_disabled_skipped():
+    es = core.build_entries("ABF", core.parse_file(ABF), P["ABF_TOP"])
+    assert [(e.page, e.target) for e in es] == [(0, 200), (1, 105)]                # Page 2 Enable=0 제외
+    assert es[1].param_text() == "R75°=195 · W30°=390 · W60°=325"
+    assert {r.color for r in es[1].rows} == {"W", "R"}
 
 
 def test_ratio_not_additive():
@@ -46,53 +64,87 @@ def test_ok_tolerance():
     assert core.is_ok(160, 150) and core.is_ok(140, 150) and not core.is_ok(161, 150)
 
 
-def test_save_only_changes_values_and_both_channels():
+def test_correction_keeps_preset_ratio_and_saves_only_values():
     p = tmp_copy(BT)
     pf = core.parse_file(p)
-    es = core.build_entries("BT", pf)
-    e = next(x for x in es if (x.page, x.angle, x.ref.color) == (1, 30, "G"))
-    e.cur_gv, e.target = 100, 150
-    ok = next(x for x in es if (x.page, x.angle) == (0, 0))
-    ok.manual_ok = True
+    es = core.build_entries("BT", pf, P["BT_TOP"])
+    g = next(e for e in es if (e.page, e.gid) == (1, "G"))
+    g.cur_gv = 120                                           # 목표 185 -> 올려야 함
+    next(e for e in es if e.page == 0).manual_ok = True
     assert core.apply_corrections(es) == 1
     bak = core.save_file(pf, True)
     old, new = open(bak, newline="").read(), open(p, newline="").read()
-    assert old == open(BT, newline="").read() and os.path.exists(bak)
+    assert old == open(BT, newline="").read()
     diff = [(a, b) for a, b in zip(old.splitlines(), new.splitlines()) if a != b]
-    assert len(diff) == 2                                                     # 좌/우 두 채널만 변경
-    for a, b in diff:
-        assert a.replace('Value="35"', "") == b.replace(b.split('Value="')[1].split('"')[0].join(['Value="', '"']), "")
-    nv = {r.value for r in core.parse_file(p).rows if (r.page, r.angle, r.color) == (1, 30, "G")}
-    assert nv == {e.ref.new_value} and e.ref.new_value > 35
+    assert len(diff) == 4                                    # 30°·60° 좌/우 4채널만 변경
+    vals = {(r.angle): r.value for r in core.parse_file(p).rows if (r.page, r.color) == (1, "G") and r.enable}
+    assert vals[30] > 35 and vals[60] == vals[30] * 5       # 1:5 정확히 유지
     assert len(new.splitlines()) == len(old.splitlines())
 
 
-def test_abf_scales_all_colors_together():
+def test_unaligned_ratio_proportional_when_option_off():
+    pf = core.parse_file(BT)
+    es = core.build_entries("BT", pf, P["BT_TOP"])
+    r = next(e for e in es if (e.page, e.gid) == (2, "R"))
+    r.cur_gv = 40
+    assert core.apply_corrections([r], align_ratio=False) == 0   # 좌/우 불일치(120/210) 항목은 보정하지 않는다
+    assert all(x.new_value is None for x in r.rows)
+    g = next(e for e in es if (e.page, e.gid) == (2, "G"))
+    g.cur_gv = 80
+    core.apply_corrections([g], align_ratio=False)
+    assert abs(g.rows_of("G60")[0].new_value / g.rows_of("G30")[0].new_value - 2.0) < 0.05   # 현재 비율 유지
+
+
+def test_abf_scales_all_channels_by_g_target():
     pf = core.parse_file(ABF)
-    es = core.build_entries("ABF", pf)
-    e = next(x for x in es if (x.page, x.angle) == (1, 75))                   # R 채널만 있는 경우 R이 기준
-    assert e.ref.color == "R"
-    e.cur_gv, e.target = 100, 150
-    core.apply_corrections(es)
-    assert e.ref.new_value > 195 and all(r.new_value == e.ref.new_value for r in e.rows)
+    es = core.build_entries("ABF", pf, P["ABF_TOP"])
+    e = es[1]
+    e.cur_gv = 60
+    assert core.apply_corrections(es) == 1
+    assert all(r.new_value > r.value for r in e.rows)
 
 
 def test_find_item_file():
     d = tempfile.mkdtemp()
     shutil.copy(BT, d)
+    assert core.find_item_file(d, ["nope", "LightSpec-bt"]).endswith("LightSpec-bt.xml")
+    os.makedirs(os.path.join(d, "Top"))
+    shutil.copy(BT, os.path.join(d, "Top"))
+    assert os.sep + "Top" + os.sep in core.find_item_file(d, ["Top"])
+    try:
+        core.find_item_file(d, ["Bottom"])
+        assert False
+    except FileNotFoundError:
+        pass
+
+
+def test_left_right_mismatch_detected_and_fixed():
+    p = tmp_copy(BT)
+    pf = core.parse_file(p)
+    es = core.build_entries("BT", pf, P["BT_TOP"])
+    bad = [(e, e.mismatches()) for e in es if e.mismatches()]
+    assert len(bad) == 1 and list(bad[0][1].values()) == [[120, 210]]       # 3번 조명 R 60°: 120/210
+    e = bad[0][0]
+    (k,) = e.mismatches()
+    e.cur_gv = 50
+    assert core.apply_corrections(es) == 0 or all(r.new_value is None for r in e.rows)   # 통일 전에는 GV 보정 제외
+    assert core.apply_fixes(e, {k: 120}) == 1 and e.fixed
+    core.save_file(pf, False)
+    again = core.build_entries("BT", core.parse_file(p), P["BT_TOP"])
+    assert not any(x.mismatches() for x in again)
+    assert core.apply_fixes(e, {k: 5000}) == 0                               # 범위 밖 값 거부
+
+
+def test_password_default_and_change():
+    cfg = {}
+    assert core.verify_password(cfg, "1234") and not core.verify_password(cfg, "0000")
+    core.set_password(cfg, "abcd")
+    assert core.verify_password(cfg, "abcd") and not core.verify_password(cfg, "1234")
+
+
+def test_find_kind_file_without_item_name():
+    d = tempfile.mkdtemp()
+    shutil.copy(BT, d)
     shutil.copy(ABF, d)
-    assert core.find_item_file(d, "LightSpec-bt").endswith("LightSpec-bt.xml")
-    assert core.find_item_file(d, "탑1", "ABF").endswith("LightSpec-ABF.xml")   # 종류로 보조 탐색
-    os.makedirs(os.path.join(d, "탑1"))
-    shutil.copy(BT, os.path.join(d, "탑1"))
-    assert os.sep + "탑1" + os.sep in core.find_item_file(d, "탑1", "BT")
-
-
-def test_default_presets_and_angle_targets():
-    ps = core.default_presets()
-    assert [p["name"] for p in ps] == ["BT Top", "BT Bottom", "ABF Top", "ABF Bottom"]
-    assert all(p["target"] == 100 for p in ps)
-    es = core.build_entries("BT", core.parse_file(BT), {}, 100, {30: 97})
-    assert {e.target for e in es if e.angle == 30} == {97} and {e.target for e in es if e.angle != 30} == {100}
-    saved = {es[0].key: 90}
-    assert core.build_entries("BT", core.parse_file(BT), saved, 100, {30: 97})[0].target == 90
+    assert core.find_kind_file(d, "BT").endswith("LightSpec-bt.xml")
+    assert core.find_kind_file(d, "ABF").endswith("LightSpec-ABF.xml")

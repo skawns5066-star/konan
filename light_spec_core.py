@@ -5,6 +5,8 @@
   - 같은 각도·색의 채널이 좌/우로 2개씩 있으므로(예: 30° 두 개) 한 항목으로 묶어 같이 바꾼다.
   - 저장은 Value="..." 숫자만 제자리 치환하므로 나머지 XML(주석, 탭, 줄바꿈, 인코딩)은 그대로 보존된다.
 """
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -114,35 +116,39 @@ def parse_file(path):
     return parse_text(text, path, enc)
 
 
-def find_item_file(model_dir, item, kind=None):
-    """모델 폴더에서 항목에 해당하는 XML 탐색.
+def find_item_file(model_dir, names):
+    """모델 폴더에서 이름 후보(names)에 해당하는 XML 탐색.
 
-    1) 항목명과 같은 파일(확장자/대소문자 무시)  2) 항목명과 같은 하위 폴더 안의 LightSpec XML
-    3) 항목명이 없거나 못 찾으면 LightSpec*{BT|ABF}*.xml 이 모델 폴더에 하나뿐일 때 그 파일
+    후보 순서대로 1) 같은 이름의 파일(확장자/대소문자 무시) 2) 같은 이름 하위 폴더 안의 XML(하나뿐일 때).
+    찾지 못하면 FileNotFoundError (GUI가 파일 선택창을 띄운다).
     """
     d = Path(model_dir)
     if not d.is_dir():
         raise FileNotFoundError(f"모델 폴더가 없습니다: {d}")
+    entries = sorted(d.iterdir())
+    for name in ([names] if isinstance(names, str) else names):
+        low = name.strip().lower()
+        if not low:
+            continue
+        for p in entries:
+            if p.is_file() and not re.search(r"\.bak_\d", p.name) and low in (p.name.lower(), p.stem.lower()):
+                return str(p)
+        for sub in (x for x in entries if x.is_dir() and x.name.lower() == low):
+            xs = [x for x in sorted(sub.iterdir()) if x.is_file() and x.suffix.lower() == ".xml"]
+            if len(xs) == 1:
+                return str(xs[0])
+    raise FileNotFoundError(f"규격 파일을 찾을 수 없습니다: {d}")
 
-    def xmls(folder):
-        return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".xml")
 
-    def of_kind(ps):
-        return [p for p in ps if kind and kind.lower() in p.name.lower()]
-
-    low = item.strip().lower()
-    for p in sorted(d.iterdir()):
-        if p.is_file() and not re.search(r"\.bak_\d", p.name) and low in (p.name.lower(), p.stem.lower()):
-            return str(p)
-    for sub in sorted(x for x in d.iterdir() if x.is_dir() and x.name.lower() == low):
-        cands = xmls(sub)
-        cands = of_kind(cands) or cands
-        if len(cands) == 1:
-            return str(cands[0])
-    cands = of_kind(xmls(d))
-    if len(cands) == 1:
-        return str(cands[0])
-    raise FileNotFoundError(f"'{item}' 파일을 찾을 수 없습니다: {d}")
+def find_kind_file(model_dir, kind):
+    """항목명 없이 모델 폴더에 바로 있는 파일: 이름에 BT/ABF가 들어간 XML이 하나뿐이면 그 파일."""
+    d = Path(model_dir)
+    if not d.is_dir():
+        raise FileNotFoundError(f"모델 폴더가 없습니다: {d}")
+    xs = [p for p in sorted(d.iterdir()) if p.is_file() and p.suffix.lower() == ".xml" and kind.lower() in p.name.lower()]
+    if len(xs) == 1:
+        return str(xs[0])
+    raise FileNotFoundError(f"{kind} 규격 파일을 특정할 수 없습니다 (후보 {len(xs)}개): {d}")
 
 
 def save_file(parsed, backup):
@@ -202,84 +208,226 @@ def calc_new_value(cur_param, cur_gv, target, exponent):
     return int(best)
 
 
+# ---------------------------------------------------------------- 프리셋 (presets.json)
+def load_presets():
+    """프로그램 폴더의 presets.json 을 읽고, 사용자 폴더의 light_gv_presets.json 이 있으면 키 단위로 덮어쓴다.
+    새 모델/규격은 코드 수정 없이 JSON 에 프리셋을 추가하면 된다."""
+    presets = {}
+    for path in (Path(__file__).with_name("presets.json"), Path(os.path.expanduser("~")) / "light_gv_presets.json"):
+        try:
+            presets.update(json.loads(path.read_text(encoding="utf-8")).get("presets", {}))
+        except (OSError, ValueError):
+            pass
+    return presets
+
+
+def rkey(color, angle):
+    return f"{color}{angle}"
+
+
 @dataclass
 class Entry:
-    """화면 표의 한 줄 = 함께 보정되는 채널 묶음.
+    """화면 표의 한 줄 = 함께 보정되는 채널 묶음(한 조명의 한 GV 채널).
 
-    BT : 같은 (조명, 각도, 색)의 좌/우 채널 묶음. ABF : 같은 (조명, 각도)의 모든 색 채널 묶음.
-    ref(GV 기준 채널; ABF는 Green, 없으면 W)의 새 값을 구한 뒤 묶음 전체에 같은 비율을 적용한다.
+    BT : 한 색의 각도들(예: R0:R30 = 1:4). ABF : 한 조명의 모든 색/각도(예: W30:W60:R75 = 6:5:3).
+    목표 GV 에 맞는 배율을 구해 묶음 전체에 적용하되, 프리셋 비율이 있으면 그 비율대로 값을 재구성한다.
     """
     kind: str
     set_index: int
     page: int
-    angle: int
+    gid: str                 # 묶음 id (BT: 색, ABF: 'G' = GV 기준 채널)
+    label: str
     rows: list
-    ref: LightRow
+    ratio: dict = field(default_factory=dict)     # 프리셋 비율 {"R0":1,"R30":4}
+    targets: dict = field(default_factory=dict)   # 소재별 목표 GV {"AU":195}
+    material: str = ""
     target: float = DEFAULT_TARGET
     cur_gv: float = None
     manual_ok: bool = False
+    fixed: bool = False      # 좌/우 불일치를 사용자가 입력한 값으로 통일했는지
 
     @property
     def key(self):
-        return f"{self.set_index}|{self.page}|{self.angle}|{self.ref.color}"
+        return f"{self.set_index}|{self.page}|{self.gid}"
+
+    def mismatches(self):
+        """같은 색·각도의 좌/우 채널 값이 서로 다른 경우 {키: [값들]}. 정상 파일이면 빈 dict."""
+        bad = {}
+        for k in self.keys():
+            vals = []
+            for r in self.rows_of(k):
+                if r.value not in vals:
+                    vals.append(r.value)
+            if len(vals) > 1:
+                bad[k] = vals
+        return bad
 
     @property
     def ok(self):
         return self.manual_ok or (self.cur_gv is not None and is_ok(self.cur_gv, self.target))
 
-    def param(self, color):
-        """표시용 현재 파라미터. 좌/우 값이 다르면 '120/210' 처럼 모두 표시, 해당 색이 없으면 None."""
-        vals = []
-        for r in self.rows:
-            if r.color == color and r.value not in vals:
-                vals.append(r.value)
-        return "/".join(str(v) for v in vals) if vals else None
+    def keys(self):
+        """사용 중인 (색+각도) 키, 각도 오름차순 (BT 는 색이 하나뿐)."""
+        return sorted({rkey(r.color, r.angle) for r in self.rows}, key=lambda k: (k[0], int(k[1:])))
+
+    def rows_of(self, key):
+        return [r for r in self.rows if rkey(r.color, r.angle) == key]
+
+    def param_text(self):
+        """표시용 현재 파라미터. 좌/우 값이 다르면 '120/210'. 예: R0°=1 · R30°=4"""
+        out = []
+        for k in self.keys():
+            vals = []
+            for r in self.rows_of(k):
+                if r.value not in vals:
+                    vals.append(r.value)
+            out.append(f"{k[0]}{k[1:]}°={'/'.join(str(v) for v in vals)}")
+        return " · ".join(out)
+
+    def ratio_text(self):
+        if not self.ratio:
+            return "-"
+        return ":".join(str(self.ratio[k]) for k in self.keys() if k in self.ratio)
+
+    def ratio_usable(self):
+        """사용 중인 모든 키에 프리셋 비율이 있으면 프리셋 비율로 재구성 가능."""
+        return bool(self.ratio) and all(self.ratio.get(k, 0) > 0 for k in self.keys())
+
+    def ratio_matches(self, tol=0.08):
+        """현재 파일 값이 프리셋 비율과 맞는지 (앵커 대비 ±8%)."""
+        if not self.ratio_usable():
+            return None
+        anchor = self.anchor_key()
+        a = self.rows_of(anchor)[0].value
+        if a <= 0:
+            return False
+        for k in self.keys():
+            want = a * self.ratio[k] / self.ratio[anchor]
+            for r in self.rows_of(k):
+                if abs(r.value - want) > max(1.0, want * tol):
+                    return False
+        return True
+
+    def anchor_key(self):
+        """비율이 가장 작은 키 = 기준(1) 채널."""
+        ks = self.keys()
+        return min(ks, key=lambda k: (self.ratio.get(k, 1e9), ks.index(k)))
+
+    def set_material(self, material):
+        if material in self.targets:
+            self.material, self.target = material, self.targets[material]
 
 
-def default_presets():
-    """미리 만들어 두는 4개 프리셋. 이름·목표·각도별 목표는 화면에서 바꿀 수 있고 추가도 가능하다."""
-    return [{"id": f"{k.lower()}_{pos.lower()}", "kind": k, "name": f"{k} {pos}", "target": DEFAULT_TARGET,
-             "angle_targets": {}, "file": ""}
-            for k in ("BT", "ABF") for pos in ("Top", "Bottom")]
+def build_entries(kind, parsed, preset=None, saved_targets=None, default_target=DEFAULT_TARGET):
+    """사용 중(Page·Channel Enable=1)인 채널을 프리셋 규칙에 따라 화면 항목으로 묶는다.
 
-
-def build_entries(kind, parsed, targets=None, default_target=DEFAULT_TARGET, angle_targets=None):
-    """사용 중(Page·Channel Enable=1)인 채널만 화면 항목으로 만든다."""
-    groups = {}
-    for r in parsed.rows:
-        if r.enable:
-            k = (r.set_index, r.page, r.angle) + (() if kind == "ABF" else (COLORS.index(r.color),))
-            groups.setdefault(k, []).append(r)
+    프리셋에 없는 조명(페이지)은 BT: 색별, ABF: 조명별로 묶고 비율/목표는 비워 둔다(현재 비율 유지).
+    """
+    lights = (preset or {}).get("lights", {})
     entries = []
-    for k, rows in sorted(groups.items()):
-        ref = rows[0]
-        if kind == "ABF":
-            ref = next((r for r in rows if r.color == "G"), next((r for r in rows if r.color == "W"), rows[0]))
-        entries.append(Entry(kind, k[0], k[1], k[2], rows, ref))
-    for e in entries:
-        # 우선순위: 행별 저장값 > 각도별 목표 > 프리셋 기본 목표
-        e.target = (targets or {}).get(e.key, (angle_targets or {}).get(e.angle, default_target))
+    for page in sorted({(r.set_index, r.page) for r in parsed.rows if r.enable}):
+        set_idx, pg = page
+        rows = [r for r in parsed.rows if r.enable and (r.set_index, r.page) == page]
+        light = lights.get(str(pg + 1))
+        lname = light["name"] if light else f"{pg + 1}호"
+        if light:
+            groups = light["groups"]
+        elif kind == "ABF":
+            groups = [{"id": "G", "colors": None, "gv_channel": "G", "ratio": {}, "targets": {}}]
+        else:
+            groups = [{"id": c, "colors": [c], "gv_channel": c, "ratio": {}, "targets": {}}
+                      for c in COLORS if any(r.color == c for r in rows)]
+        for grp in groups:
+            members = [r for r in rows if grp.get("colors") is None or r.color in grp["colors"]]
+            if not members:
+                continue
+            ch = grp.get("gv_channel", grp["id"])
+            label = f"{lname} · {ch}" if kind == "BT" else f"{lname} · {ch} 기준"
+            e = Entry(kind, set_idx, pg, grp["id"], label, members, dict(grp.get("ratio", {})), dict(grp.get("targets", {})))
+            if e.targets:
+                e.set_material(next(iter(e.targets)))
+            else:
+                e.target = default_target
+            if saved_targets and e.key in saved_targets:
+                e.target = saved_targets[e.key]
+            entries.append(e)
     return entries
 
 
-def apply_corrections(entries, exponents=None):
-    """OK가 아니고 현재 GV가 입력된 항목의 new_value를 채운다. 변경된 항목 수 반환."""
+def apply_fixes(entry, fixes):
+    """좌/우 불일치 수정. fixes = {키(예 'R30'): 통일할 값}. 적용한 키 수를 반환.
+
+    값이 바뀌는 채널만 new_value 를 채운다. 파일 값이 바뀌므로 이 항목의 GV 보정은 재측정 후로 미룬다.
+    """
+    n = 0
+    for k, v in fixes.items():
+        if not 0 <= v <= MAX_VALUE or k not in entry.mismatches():
+            continue
+        for r in entry.rows_of(k):
+            r.new_value = int(v) if r.value != v else None
+        n += 1
+    entry.fixed = n > 0
+    return n
+
+
+def apply_corrections(entries, exponents=None, align_ratio=True):
+    """OK가 아니고 현재 GV가 입력된 항목의 new_value를 채운다. 변경된 항목 수 반환.
+
+    배율은 앵커 채널(비율 1) 기준으로 비선형 모델로 구하고, 프리셋 비율이 있으면
+    다른 각도/색 채널은 `앵커 새 값 × 비율`로 계산해 비율을 정확히 유지한다(없으면 같은 배율로 비례).
+    """
     changed = 0
     for e in entries:
-        if e.ok or e.cur_gv is None or e.ref.value <= 0:
+        if e.ok or e.cur_gv is None or not e.rows or e.mismatches():
+            continue    # 좌/우 값이 다른 항목은 먼저 값을 통일(apply_fixes)한 뒤 재측정해야 한다
+        use_ratio = align_ratio and e.ratio_usable()
+        anchor = e.anchor_key() if e.ratio else e.keys()[0]
+        arow = e.rows_of(anchor)[0]
+        if arow.value <= 0:
             continue
-        exp = exponent_for(e.kind, e.page, e.ref.color, exponents)
-        new_ref = calc_new_value(e.ref.value, e.cur_gv, e.target, exp)
-        if new_ref == e.ref.value:
+        exp = exponent_for(e.kind, e.page, next((g for g in [e.gid] if g in COLORS), "G"), exponents)
+        new_a = calc_new_value(arow.value, e.cur_gv, e.target, exp)
+        # 가장 큰 채널이 MAX_VALUE 를 넘지 않도록 앵커를 제한 (넘으면 비율이 깨지므로 클램프 대신 전체를 축소)
+        top = max(e.ratio[k] for k in e.keys()) / e.ratio[anchor] if use_ratio else max(r.value for r in e.rows) / arow.value
+        new_a = min(new_a, int(MAX_VALUE / top))
+        if new_a == arow.value and not use_ratio:
             continue
-        ratio = new_ref / e.ref.value
+        scale = new_a / arow.value
+        any_change = False
         for r in e.rows:
-            if r is e.ref or r.value == 0:
+            if r.value == 0:
                 continue
-            r.new_value = min(MAX_VALUE, max(1, round(r.value * ratio)))
-        e.ref.new_value = new_ref
+            k = rkey(r.color, r.angle)
+            nv = new_a * e.ratio[k] / e.ratio[anchor] if use_ratio else r.value * scale
+            r.new_value = min(MAX_VALUE, max(1, round(nv)))
+            any_change |= r.new_value != r.value
+        if not any_change:
+            for r in e.rows:
+                r.new_value = None
+            continue
         changed += 1
     return changed
+
+
+# ---------------------------------------------------------------- 목표 GV 수정 비밀번호
+DEFAULT_PASSWORD = "1234"
+
+
+def _pw_hash(pw, salt):
+    return hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, 100_000).hex()
+
+
+def verify_password(cfg, pw):
+    """저장된 비밀번호가 없으면 초기 비밀번호(1234)와 비교한다."""
+    rec = cfg.get("password")
+    if not rec:
+        return hmac.compare_digest(pw.encode("utf-8"), DEFAULT_PASSWORD.encode("utf-8"))
+    return hmac.compare_digest(_pw_hash(pw, bytes.fromhex(rec["salt"])), rec["hash"])
+
+
+def set_password(cfg, pw):
+    salt = os.urandom(16)
+    cfg["password"] = {"salt": salt.hex(), "hash": _pw_hash(pw, salt)}
 
 
 # ---------------------------------------------------------------- 설정 저장

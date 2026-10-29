@@ -1,0 +1,401 @@
+{
+ "_comment": "조명 프리셋. ratio 키는 '색+각도'(0=동축), 목표 GV는 소재별(AU/OSP/SR/SOP), 범위(190~195)는 큰 값. 첫 소재가 기본값. colors:null=모든 색.",
+ "_source": "7M70-025 STRIP(BT), 7N02-284 UNIT(ABF) 규격 엑셀",
+ "presets": {
+  "BT_TOP": {
+   "label": "BT Top (Strip)",
+   "kind": "BT",
+   "aliases": [
+    "BT_Top",
+    "BT Top",
+    "Top",
+    "탑",
+    "LightSpec-bt-Top"
+   ],
+   "lights": {
+    "1": {
+     "name": "DMG 1호",
+     "groups": [
+      {
+       "id": "R",
+       "colors": [
+        "W"
+       ],
+       "gv_channel": "R",
+       "ratio": {
+        "W0": 1,
+        "W30": 3,
+        "W60": 3
+       },
+       "targets": {
+        "AU": 180,
+        "OSP": 140
+       }
+      }
+     ]
+    },
+    "2": {
+     "name": "2호",
+     "groups": [
+      {
+       "id": "R",
+       "colors": [
+        "R"
+       ],
+       "gv_channel": "R",
+       "ratio": {
+        "R0": 1,
+        "R30": 4
+       },
+       "targets": {
+        "AU": 195
+       }
+      },
+      {
+       "id": "G",
+       "colors": [
+        "G"
+       ],
+       "gv_channel": "G",
+       "ratio": {
+        "G30": 1,
+        "G60": 5
+       },
+       "targets": {
+        "AU": 185
+       }
+      },
+      {
+       "id": "B",
+       "colors": [
+        "B"
+       ],
+       "gv_channel": "B",
+       "ratio": {
+        "B30": 1,
+        "B60": 2
+       },
+       "targets": {
+        "AU": 175
+       }
+      }
+     ]
+    },
+    "3": {
+     "name": "3호",
+     "groups": [
+      {
+       "id": "R",
+       "colors": [
+        "R"
+       ],
+       "gv_channel": "R",
+       "ratio": {
+        "R0": 4,
+        "R60": 1
+       },
+       "targets": {
+        "SR": 80
+       }
+      },
+      {
+       "id": "G",
+       "colors": [
+        "G"
+       ],
+       "gv_channel": "G",
+       "ratio": {
+        "G30": 1,
+        "G60": 2
+       },
+       "targets": {
+        "SR": 60
+       }
+      },
+      {
+       "id": "B",
+       "colors": [
+        "B"
+       ],
+       "gv_channel": "B",
+       "ratio": {
+        "B30": 1,
+        "B60": 2
+       },
+       "targets": {
+        "SR": 100
+       }
+      }
+     ]
+    }
+   }
+  },
+  "BT_BOTTOM": {
+   "label": "BT Bottom (Strip)",
+   "kind": "BT",
+   "aliases": [
+    "BT_Bottom",
+    "BT Bottom",
+    "Bottom",
+    "바텀",
+    "LightSpec-bt-Bottom"
+   ],
+   "lights": {
+    "1": {
+     "name": "DMG 1호",
+     "groups": [
+      {
+       "id": "R",
+       "colors": [
+        "W"
+       ],
+       "gv_channel": "R",
+       "ratio": {
+        "W0": 1,
+        "W30": 3,
+        "W60": 3
+       },
+       "targets": {
+        "AU": 180,
+        "OSP": 140
+       }
+      }
+     ]
+    },
+    "2": {
+     "name": "2호",
+     "groups": [
+      {
+       "id": "R",
+       "colors": [
+        "R"
+       ],
+       "gv_channel": "R",
+       "ratio": {
+        "R0": 1,
+        "R30": 4
+       },
+       "targets": {
+        "AU": 255,
+        "OSP": 195
+       }
+      },
+      {
+       "id": "G",
+       "colors": [
+        "G"
+       ],
+       "gv_channel": "G",
+       "ratio": {
+        "G30": 1,
+        "G60": 3
+       },
+       "targets": {
+        "AU": 185,
+        "OSP": 80
+       }
+      },
+      {
+       "id": "B",
+       "colors": [
+        "B"
+       ],
+       "gv_channel": "B",
+       "ratio": {
+        "B30": 1,
+        "B60": 2
+       },
+       "targets": {
+        "AU": 250,
+        "OSP": 175
+       }
+      }
+     ]
+    },
+    "3": {
+     "name": "3호",
+     "groups": [
+      {
+       "id": "R",
+       "colors": [
+        "R"
+       ],
+       "gv_channel": "R",
+       "ratio": {
+        "R0": 4,
+        "R60": 1
+       },
+       "targets": {
+        "SR": 80
+       }
+      },
+      {
+       "id": "G",
+       "colors": [
+        "G"
+       ],
+       "gv_channel": "G",
+       "ratio": {
+        "G30": 1,
+        "G60": 2
+       },
+       "targets": {
+        "SR": 60
+       }
+      },
+      {
+       "id": "B",
+       "colors": [
+        "B"
+       ],
+       "gv_channel": "B",
+       "ratio": {
+        "B0": 1,
+        "B60": 10
+       },
+       "targets": {
+        "SR": 100
+       }
+      }
+     ]
+    }
+   }
+  },
+  "ABF_TOP": {
+   "label": "ABF Top (Unit)",
+   "kind": "ABF",
+   "aliases": [
+    "ABF_Top",
+    "ABF Top",
+    "Top",
+    "탑",
+    "LightSpec-ABF-Top"
+   ],
+   "lights": {
+    "1": {
+     "name": "DMG 1호",
+     "groups": [
+      {
+       "id": "G",
+       "colors": null,
+       "gv_channel": "G",
+       "ratio": {
+        "W0": 1,
+        "W30": 3,
+        "W60": 3
+       },
+       "targets": {
+        "OSP": 200,
+        "SOP": 150
+       }
+      }
+     ]
+    },
+    "2": {
+     "name": "2호",
+     "groups": [
+      {
+       "id": "G",
+       "colors": null,
+       "gv_channel": "G",
+       "ratio": {
+        "W30": 6,
+        "W60": 5,
+        "R75": 3
+       },
+       "targets": {
+        "SR": 105
+       }
+      }
+     ]
+    },
+    "3": {
+     "name": "3호",
+     "groups": [
+      {
+       "id": "G",
+       "colors": null,
+       "gv_channel": "G",
+       "ratio": {
+        "W0": 1,
+        "W30": 10,
+        "W60": 10,
+        "R75": 10
+       },
+       "targets": {
+        "OSP": 160,
+        "SOP": 110
+       }
+      }
+     ]
+    }
+   }
+  },
+  "ABF_BOTTOM": {
+   "label": "ABF Bottom (Unit)",
+   "kind": "ABF",
+   "aliases": [
+    "ABF_Bottom",
+    "ABF Bottom",
+    "Bottom",
+    "바텀",
+    "LightSpec-ABF-Bottom"
+   ],
+   "lights": {
+    "1": {
+     "name": "DMG 1호",
+     "groups": [
+      {
+       "id": "G",
+       "colors": null,
+       "gv_channel": "G",
+       "ratio": {
+        "W0": 1,
+        "W30": 1,
+        "W60": 1
+       },
+       "targets": {
+        "AU": 225
+       }
+      }
+     ]
+    },
+    "2": {
+     "name": "2호",
+     "groups": [
+      {
+       "id": "G",
+       "colors": null,
+       "gv_channel": "G",
+       "ratio": {
+        "W30": 1,
+        "W60": 1
+       },
+       "targets": {
+        "SR": 85
+       }
+      }
+     ]
+    },
+    "3": {
+     "name": "3호",
+     "groups": [
+      {
+       "id": "G",
+       "colors": null,
+       "gv_channel": "G",
+       "ratio": {
+        "W0": 1,
+        "W30": 2,
+        "W60": 2
+       },
+       "targets": {
+        "AU": 180
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}
