@@ -38,6 +38,14 @@ DEFAULT_EXPONENTS = {
 }
 
 
+class SpecFileError(FileNotFoundError):
+    """파일/폴더를 못 찾았을 때. 화면 언어에 맞춰 번역할 수 있도록 key/params 를 함께 가진다."""
+
+    def __init__(self, key, ko_message, **params):
+        super().__init__(ko_message)
+        self.key, self.params = key, params
+
+
 @dataclass
 class LightRow:
     set_index: int
@@ -124,7 +132,7 @@ def find_item_file(model_dir, names):
     """
     d = Path(model_dir)
     if not d.is_dir():
-        raise FileNotFoundError(f"모델 폴더가 없습니다: {d}")
+        raise SpecFileError("err_model_dir", f"모델 폴더가 없습니다: {d}", d=d)
     entries = sorted(d.iterdir())
     for name in ([names] if isinstance(names, str) else names):
         low = name.strip().lower()
@@ -137,18 +145,18 @@ def find_item_file(model_dir, names):
             xs = [x for x in sorted(sub.iterdir()) if x.is_file() and x.suffix.lower() == ".xml"]
             if len(xs) == 1:
                 return str(xs[0])
-    raise FileNotFoundError(f"규격 파일을 찾을 수 없습니다: {d}")
+    raise SpecFileError("err_spec_none", f"규격 파일을 찾을 수 없습니다: {d}", d=d)
 
 
 def find_kind_file(model_dir, kind):
     """항목명 없이 모델 폴더에 바로 있는 파일: 이름에 BT/ABF가 들어간 XML이 하나뿐이면 그 파일."""
     d = Path(model_dir)
     if not d.is_dir():
-        raise FileNotFoundError(f"모델 폴더가 없습니다: {d}")
+        raise SpecFileError("err_model_dir", f"모델 폴더가 없습니다: {d}", d=d)
     xs = [p for p in sorted(d.iterdir()) if p.is_file() and p.suffix.lower() == ".xml" and kind.lower() in p.name.lower()]
     if len(xs) == 1:
         return str(xs[0])
-    raise FileNotFoundError(f"{kind} 규격 파일을 특정할 수 없습니다 (후보 {len(xs)}개): {d}")
+    raise SpecFileError("err_kind_ambig", f"{kind} 규격 파일을 특정할 수 없습니다 (후보 {len(xs)}개): {d}", kind=kind, n=len(xs), d=d)
 
 
 def save_file(parsed, backup):
@@ -245,6 +253,9 @@ class Entry:
     cur_gv: float = None
     manual_ok: bool = False
     fixed: bool = False      # 좌/우 불일치를 사용자가 입력한 값으로 통일했는지
+    light_no: int = 0        # 조명 번호 (화면에서 언어별 라벨을 만들 때 사용)
+    preset_name: str = ""    # 프리셋에 정의된 조명 이름 (예: "DMG 1호"), 없으면 ""
+    ch: str = ""             # GV 기준 채널 (R/G/B/W)
 
     @property
     def key(self):
@@ -344,6 +355,7 @@ def build_entries(kind, parsed, preset=None, saved_targets=None, default_target=
             ch = grp.get("gv_channel", grp["id"])
             label = f"{lname} · {ch}" if kind == "BT" else f"{lname} · {ch} 기준"
             e = Entry(kind, set_idx, pg, grp["id"], label, members, dict(grp.get("ratio", {})), dict(grp.get("targets", {})))
+            e.light_no, e.preset_name, e.ch = pg + 1, (light["name"] if light else ""), ch
             if e.targets:
                 e.set_material(next(iter(e.targets)))
             else:

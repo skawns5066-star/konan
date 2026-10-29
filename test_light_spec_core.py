@@ -148,3 +148,25 @@ def test_find_kind_file_without_item_name():
     shutil.copy(ABF, d)
     assert core.find_kind_file(d, "BT").endswith("LightSpec-bt.xml")
     assert core.find_kind_file(d, "ABF").endswith("LightSpec-ABF.xml")
+
+
+def test_translations_complete_and_consistent():
+    import re
+    import i18n
+    for key, vals in i18n.TEXT.items():
+        assert len(vals) == len(i18n.LANGS) and all(vals), key
+        holders = [sorted(re.findall(r"\{(\w+)", v)) for v in vals]
+        assert holders[0] == holders[1] == holders[2], key        # 언어마다 {자리표시자}가 같아야 한다
+    i18n.set_lang("zh")
+    assert i18n.t("light_n", n=2) == "2號光源"
+    i18n.set_lang("vi")
+    assert i18n.t("light_n", n=2) == "Đèn 2"
+    i18n.set_lang("ko")
+
+
+def test_spec_file_error_is_translatable():
+    try:
+        core.find_kind_file(os.path.join(tempfile.mkdtemp(), "none"), "BT")
+        assert False
+    except core.SpecFileError as ex:
+        assert ex.key == "err_model_dir" and "d" in ex.params and isinstance(ex, FileNotFoundError)
