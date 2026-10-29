@@ -224,3 +224,20 @@ def test_measurement_sheet_reader():
     data = fe.read_sheet(os.path.join(HERE, "samples", "measure_BT_2호기.xlsx"))
     assert len(data) == 7 and all(len(v) == 3 for v in data.values())       # 7개 (조명,색) x 3개 위치
     assert fe.pooled_exponent(data[("BT", 2, "R")]) and abs(fe.pooled_exponent(data[("BT", 2, "R")]) - 0.21) < 0.01
+
+
+def test_abf_measurement_drops_input_mistake_and_matches_defaults():
+    import fit_exponents as fe
+    data = fe.read_sheet(os.path.join(HERE, "samples", "measure_ABF_1.xlsx"))
+    assert sorted(data) == [("ABF", 1, "G"), ("ABF", 2, "G"), ("ABF", 3, "G")] and all(len(v) == 2 for v in data.values())
+    series, dropped = fe.clean_group(data[("ABF", 3, "G")])
+    assert dropped == [(6, 162)]                           # 파라미터 6 > 5 인데 GV 162 < 170 : 입력 실수
+    for light in (1, 2, 3):
+        s, d = fe.clean_group(data[("ABF", light, "G")])
+        assert abs(fe.pooled_exponent(s) - core.DEFAULT_EXPONENTS[("ABF", light - 1, "G")]) < 0.01
+
+
+def test_clean_group_keeps_clean_series_untouched():
+    import fit_exponents as fe
+    s, d = fe.clean_group(MEASURED_2R)
+    assert d == [] and [sorted(x) for x in MEASURED_2R] == s
