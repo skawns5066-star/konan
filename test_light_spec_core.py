@@ -86,3 +86,13 @@ def test_find_item_file():
     os.makedirs(os.path.join(d, "탑1"))
     shutil.copy(BT, os.path.join(d, "탑1"))
     assert os.sep + "탑1" + os.sep in core.find_item_file(d, "탑1", "BT")
+
+
+def test_default_presets_and_angle_targets():
+    ps = core.default_presets()
+    assert [p["name"] for p in ps] == ["BT Top", "BT Bottom", "ABF Top", "ABF Bottom"]
+    assert all(p["target"] == 100 for p in ps)
+    es = core.build_entries("BT", core.parse_file(BT), {}, 100, {30: 97})
+    assert {e.target for e in es if e.angle == 30} == {97} and {e.target for e in es if e.angle != 30} == {100}
+    saved = {es[0].key: 90}
+    assert core.build_entries("BT", core.parse_file(BT), saved, 100, {30: 97})[0].target == 90

@@ -16,7 +16,7 @@ from pathlib import Path
 
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
-DEFAULT_TARGET = 150    # 목표 GV 기본값 (화면에서 행별로 수정/저장 가능)
+DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
 MAX_STEP = 3.0          # 1회 보정에서 파라미터를 바꿀 수 있는 최대 배율(과보정 방지)
 MAX_VALUE = 1024        # 샘플 XML에서 확인되는 Value 최대값
 MIN_EXPONENT = 0.25     # 포화되는 조명에서 지수가 0에 가까워 폭주하는 것을 방지
@@ -236,7 +236,14 @@ class Entry:
         return "/".join(str(v) for v in vals) if vals else None
 
 
-def build_entries(kind, parsed, targets=None, default_target=DEFAULT_TARGET):
+def default_presets():
+    """미리 만들어 두는 4개 프리셋. 이름·목표·각도별 목표는 화면에서 바꿀 수 있고 추가도 가능하다."""
+    return [{"id": f"{k.lower()}_{pos.lower()}", "kind": k, "name": f"{k} {pos}", "target": DEFAULT_TARGET,
+             "angle_targets": {}, "file": ""}
+            for k in ("BT", "ABF") for pos in ("Top", "Bottom")]
+
+
+def build_entries(kind, parsed, targets=None, default_target=DEFAULT_TARGET, angle_targets=None):
     """사용 중(Page·Channel Enable=1)인 채널만 화면 항목으로 만든다."""
     groups = {}
     for r in parsed.rows:
@@ -250,7 +257,8 @@ def build_entries(kind, parsed, targets=None, default_target=DEFAULT_TARGET):
             ref = next((r for r in rows if r.color == "G"), next((r for r in rows if r.color == "W"), rows[0]))
         entries.append(Entry(kind, k[0], k[1], k[2], rows, ref))
     for e in entries:
-        e.target = (targets or {}).get(e.key, default_target)
+        # 우선순위: 행별 저장값 > 각도별 목표 > 프리셋 기본 목표
+        e.target = (targets or {}).get(e.key, (angle_targets or {}).get(e.angle, default_target))
     return entries
 
 

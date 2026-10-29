@@ -18,12 +18,12 @@ class App(tk.Tk):
         self.title("조명 GV 설정/보정")
         self.geometry("980x640")
         self.cfg = core.load_config()
-        self.cfg.setdefault("items", {"BT": [], "ABF": []})
+        if not self.cfg.get("presets"):
+            self.cfg["presets"] = core.default_presets()
         self.cfg.setdefault("targets", {})
-        self.model = tk.StringVar(value=self.cfg.get("last_model", ""))
         self.base = tk.StringVar(value=self.cfg.get("base_dir", core.BASE_DIR))
-        self.default_target = tk.IntVar(value=self.cfg.get("default_target", core.DEFAULT_TARGET))
         self.backup = tk.BooleanVar(value=self.cfg.get("backup", True))
+        self.model = ""
         # 설정 파일 예: "exponents": {"BT|1|G": 0.7}  (종류|Page index|색)
         self.exponents = {}
         for k, v in self.cfg.get("exponents", {}).items():
@@ -39,8 +39,8 @@ class App(tk.Tk):
             w.destroy()
 
     def persist(self):
-        self.cfg.update(last_model=self.model.get().strip(), base_dir=self.base.get(),
-                        default_target=self.default_target.get(), backup=self.backup.get())
+        self.cfg.update(last_model=self.model or self.cfg.get("last_model", ""),
+                        base_dir=self.base.get(), backup=self.backup.get())
         core.save_config(self.cfg)
 
     # ------------------------------------------------------------ 1. 메인 화면
@@ -48,78 +48,100 @@ class App(tk.Tk):
         self.clear()
         top = ttk.Frame(self.container, padding=8)
         top.pack(fill="x")
-        ttk.Label(top, text="모델명").grid(row=0, column=0, sticky="w")
-        ttk.Entry(top, textvariable=self.model, width=22).grid(row=0, column=1, padx=4)
-        ttk.Label(top, text="(예: 7M70-T33)").grid(row=0, column=2, sticky="w")
-        ttk.Label(top, text="기준 경로").grid(row=1, column=0, sticky="w", pady=(4, 0))
-        ttk.Entry(top, textvariable=self.base, width=40).grid(row=1, column=1, columnspan=2, sticky="w", padx=4, pady=(4, 0))
-        ttk.Label(top, text="기본 목표 GV").grid(row=0, column=3, padx=(20, 4))
-        ttk.Spinbox(top, from_=0, to=255, textvariable=self.default_target, width=6).grid(row=0, column=4)
+        ttk.Label(top, text="기준 경로").pack(side="left")
+        ttk.Entry(top, textvariable=self.base, width=44).pack(side="left", padx=4)
+        ttk.Label(top, text="버튼을 누르면 모델명을 물어봅니다 (예: 7P05-T33)").pack(side="left", padx=10)
 
         nb = ttk.Notebook(self.container)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for kind in ("BT", "ABF"):
-            nb.add(self.build_kind_tab(nb, kind), text=f" {kind} ")
+            tab = ttk.Frame(nb, padding=8)
+            nb.add(tab, text=f" {kind} ")
+            bar = ttk.Frame(tab)
+            bar.pack(fill="x", pady=(0, 8))
+            ttk.Button(bar, text="+", width=4, command=lambda k=kind: self.edit_preset(None, k)).pack(side="left")
+            ttk.Label(bar, text="  새 프리셋 추가  /  ✎ 이름·목표 GV·각도별 목표 편집  /  ✕ 삭제").pack(side="left")
+            for pr in [p for p in self.cfg["presets"] if p["kind"] == kind]:
+                row = ttk.Frame(tab)
+                row.pack(fill="x", pady=3)
+                tk.Button(row, text=f"{pr['name']}    (목표 GV {pr['target']})", font=("Malgun Gothic", 13),
+                          anchor="w", padx=12, pady=8, command=lambda p=pr: self.open_preset(p)).pack(
+                    side="left", fill="x", expand=True)
+                ttk.Button(row, text="✎", width=3, command=lambda p=pr: self.edit_preset(p, kind)).pack(side="left", padx=2)
+                ttk.Button(row, text="✕", width=3, command=lambda p=pr: self.delete_preset(p)).pack(side="left")
 
-    def build_kind_tab(self, parent, kind):
-        tab = ttk.Frame(parent, padding=8)
-        bar = ttk.Frame(tab)
-        bar.pack(fill="x")
-        ttk.Button(bar, text="+", width=4, command=lambda: self.add_item(kind)).pack(side="left")
-        ttk.Button(bar, text="−", width=4, command=lambda: self.remove_item(kind)).pack(side="left", padx=4)
-        ttk.Label(bar, text="항목을 더블클릭하면 파일을 불러옵니다").pack(side="left", padx=10)
-        lb = tk.Listbox(tab, font=("Malgun Gothic", 12), activestyle="none", exportselection=False)
-        lb.pack(fill="both", expand=True, pady=(8, 0))
-        for name in self.cfg["items"][kind]:
-            lb.insert("end", name)
-        lb.bind("<Double-Button-1>", lambda e: self.open_item(kind, lb))
-        lb.bind("<Return>", lambda e: self.open_item(kind, lb))
-        setattr(self, f"lb_{kind}", lb)
-        return tab
+    def edit_preset(self, preset, kind):
+        """프리셋 추가(preset=None) / 편집 대화상자: 이름, 기본 목표 GV, 각도별 목표 GV, 파일명."""
+        dlg = tk.Toplevel(self)
+        dlg.title("프리셋 편집" if preset else f"{kind} 프리셋 추가")
+        dlg.transient(self)
+        dlg.grab_set()
+        pr = preset or {"kind": kind, "name": "", "target": core.DEFAULT_TARGET, "angle_targets": {}, "file": ""}
+        name, target, fname = tk.StringVar(value=pr["name"]), tk.StringVar(value=str(pr["target"])), tk.StringVar(value=pr.get("file", ""))
+        ang = {a: tk.StringVar(value=str(pr["angle_targets"].get(str(a), pr["angle_targets"].get(a, "")))) for a in core.ANGLES[pr["kind"]]}
+        f = ttk.Frame(dlg, padding=12)
+        f.pack()
+        ttk.Label(f, text="이름").grid(row=0, column=0, sticky="w")
+        ttk.Entry(f, textvariable=name, width=24).grid(row=0, column=1, pady=2)
+        ttk.Label(f, text="기본 목표 GV").grid(row=1, column=0, sticky="w")
+        ttk.Entry(f, textvariable=target, width=8).grid(row=1, column=1, sticky="w", pady=2)
+        for i, (a, v) in enumerate(ang.items(), start=2):
+            ttk.Label(f, text=f"{a}° 목표 GV").grid(row=i, column=0, sticky="w")
+            ttk.Entry(f, textvariable=v, width=8).grid(row=i, column=1, sticky="w", pady=2)
+        ttk.Label(f, text="(각도별 비워두면 기본 목표 사용)").grid(row=i + 1, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text="XML 파일명").grid(row=i + 2, column=0, sticky="w")
+        ttk.Entry(f, textvariable=fname, width=24).grid(row=i + 2, column=1, pady=2)
+        ttk.Label(f, text="(비우면 LightSpec-" + pr["kind"] + ".xml 자동 탐색)").grid(row=i + 3, column=0, columnspan=2, sticky="w")
 
-    def add_item(self, kind):
-        name = simpledialog.askstring("항목 추가", f"{kind} 항목 이름:", parent=self)
-        name = (name or "").strip()
-        if not name:
-            return
-        if name in self.cfg["items"][kind]:
-            messagebox.showinfo("항목 추가", "이미 있는 항목입니다.")
-            return
-        self.cfg["items"][kind].append(name)
-        getattr(self, f"lb_{kind}").insert("end", name)
-        self.persist()
-
-    def remove_item(self, kind):
-        lb = getattr(self, f"lb_{kind}")
-        sel = lb.curselection()
-        if sel and messagebox.askyesno("항목 삭제", f"'{lb.get(sel[0])}' 항목을 목록에서 삭제할까요?\n(파일은 삭제되지 않습니다)"):
-            del self.cfg["items"][kind][sel[0]]
-            lb.delete(sel[0])
+        def ok():
+            try:
+                t = int(float(target.get()))
+                at = {str(a): int(float(v.get())) for a, v in ang.items() if v.get().strip()}
+            except ValueError:
+                messagebox.showwarning("입력 오류", "목표 GV는 숫자로 입력하세요.", parent=dlg)
+                return
+            if not name.get().strip():
+                messagebox.showwarning("입력 오류", "이름을 입력하세요.", parent=dlg)
+                return
+            pr.update(name=name.get().strip(), target=t, angle_targets=at, file=fname.get().strip())
+            if preset is None:
+                pr["id"] = f"{kind.lower()}_{len(self.cfg['presets'])}_{abs(hash(pr['name'])) % 9999}"
+                self.cfg["presets"].append(pr)
             self.persist()
+            dlg.destroy()
+            self.show_main()
 
-    def open_item(self, kind, lb):
-        sel = lb.curselection()
-        model = self.model.get().strip()
+        ttk.Button(f, text="확인", command=ok).grid(row=i + 4, column=0, columnspan=2, pady=(10, 0))
+
+    def delete_preset(self, preset):
+        if messagebox.askyesno("프리셋 삭제", f"'{preset['name']}' 프리셋을 삭제할까요?\n(XML 파일은 삭제되지 않습니다)"):
+            self.cfg["presets"].remove(preset)
+            self.persist()
+            self.show_main()
+
+    def open_preset(self, preset):
+        model = simpledialog.askstring("모델명", "모델명을 입력하세요 (예: 7P05-T33)", parent=self,
+                                       initialvalue=self.cfg.get("last_model", ""))
+        model = (model or "").strip()
         if not model:
-            messagebox.showwarning("모델명", "모델명을 입력하세요.")
             return
-        if not sel:
-            return
-        item = lb.get(sel[0])
+        kind = preset["kind"]
         try:
-            path = core.find_item_file(os.path.join(self.base.get(), model), item, kind)
+            path = core.find_item_file(os.path.join(self.base.get(), model), preset.get("file") or "", kind)
             parsed = core.parse_file(path)
         except (OSError, ValueError) as ex:
             messagebox.showerror("파일 로드 실패", str(ex))
             return
-        prefix = f"{model}|{kind}|{item}|"
+        self.model = model
+        prefix = f"{model}|{preset['id']}|"
         targets = {k[len(prefix):]: v for k, v in self.cfg["targets"].items() if k.startswith(prefix)}
-        entries = core.build_entries(kind, parsed, targets, self.default_target.get())
+        entries = core.build_entries(kind, parsed, targets, preset["target"],
+                                     {int(a): v for a, v in preset["angle_targets"].items()})
         if not entries:
-            messagebox.showinfo("항목 없음", "Enable=1 인 행이 없습니다.")
+            messagebox.showinfo("항목 없음", "사용(Enable=1) 중인 채널이 없습니다.")
             return
         self.persist()
-        self.show_table(kind, item, parsed, entries, prefix)
+        self.show_table(kind, preset["name"], parsed, entries, prefix)
 
     # ------------------------------------------------------------ 2. 파라미터/GV 표
     def show_table(self, kind, item, parsed, entries, prefix):
@@ -127,7 +149,7 @@ class App(tk.Tk):
         head = ttk.Frame(self.container, padding=8)
         head.pack(fill="x")
         ttk.Button(head, text="← 취소(메인)", command=self.show_main).pack(side="left")
-        ttk.Label(head, text=f"  {self.model.get()} / {kind} / {item}   —   허용 오차 ±{core.TOLERANCE}",
+        ttk.Label(head, text=f"  {self.model} / {kind} / {item}   —   허용 오차 ±{core.TOLERANCE}",
                   font=("Malgun Gothic", 11, "bold")).pack(side="left")
 
         outer = ttk.Frame(self.container)
