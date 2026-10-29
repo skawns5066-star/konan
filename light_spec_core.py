@@ -16,24 +16,26 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "2026.10.29-4"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
+VERSION = "2026.10.29-5"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
 MAX_VALUE = 1024        # 샘플 XML에서 확인되는 Value 최대값
-MIN_EXPONENT = 0.25     # 포화되는 조명에서 지수가 0에 가까워 폭주하는 것을 방지
+MIN_EXPONENT = 0.08     # 지수가 0에 가까운(포화) 조명에서 계산이 폭주하는 것을 방지하는 하한
 
 ANGLES = {"BT": (0, 30, 60), "ABF": (0, 30, 60, 75)}
 COLORS = ("W", "R", "G", "B")
 
 # 조명 반응 모델: GV ≈ k * Value^e  (로그-로그 기울기 e).
-# 첨부 측정표(측정 1~3회차)의 조명/색상별 기울기를 [MIN_EXPONENT, 1.0]로 제한한 초기값.
-# 실측에 맞춰 설정 파일(light_gv_tool.json)의 "exponents"로 덮어쓸 수 있다.
+# BT: 2호기 탑1·탑2·바텀 실측(fit_exponents.py, 조명·색별 3개 곡선의 중앙값)에서 구한 값.
+#     (1번 조명은 프리셋의 GV 기준 id 가 'R' 이라 W 와 R 키를 같이 둔다)
+# ABF: 아직 실측 전이라 이전 임시값. ABF 측정표를 받으면 fit_exponents.py 로 교체한다.
+# 실측에 맞춰 설정 파일(light_gv_tool.json)의 "exponents"로 덮어쓸 수도 있다.
 DEFAULT_EXPONENT = 0.5
 DEFAULT_EXPONENTS = {
-    ("BT", 0, "R"): 0.58, ("BT", 0, "W"): 0.58,
-    ("BT", 1, "R"): 0.25, ("BT", 1, "G"): 0.74, ("BT", 1, "B"): 0.25,
-    ("BT", 2, "R"): 0.46, ("BT", 2, "G"): 0.48, ("BT", 2, "B"): 0.25,
+    ("BT", 0, "W"): 0.51, ("BT", 0, "R"): 0.51,
+    ("BT", 1, "R"): 0.21, ("BT", 1, "G"): 0.37, ("BT", 1, "B"): 0.35,
+    ("BT", 2, "R"): 0.94, ("BT", 2, "G"): 0.59, ("BT", 2, "B"): 0.72,
     ("ABF", 0, "G"): 0.27, ("ABF", 1, "G"): 0.95, ("ABF", 2, "G"): 0.25,
 }
 
@@ -207,11 +209,13 @@ def calc_new_value(cur_param, cur_gv, target, exponent):
     def predicted(p):
         return cur_gv * (max(p, 1e-9) / cur_param) ** exponent
 
-    cands = {min(MAX_VALUE, max(0, math.floor(exact))), min(MAX_VALUE, max(0, math.ceil(exact)))}
+    # 켜져 있던 조명(cur_param>0)을 보정 때문에 0(꺼짐)으로 만들지는 않는다: 최소 1
+    lo = 1 if cur_param > 0 else 0
+    cands = {min(MAX_VALUE, max(lo, math.floor(exact))), min(MAX_VALUE, max(lo, math.ceil(exact)))}
     best = min(cands, key=lambda p: abs(predicted(p) - target))
     if best == cur_param and abs(cur_gv - target) > 0:
         best = cur_param + (1 if target > cur_gv else -1)
-        best = min(max(best, 0), MAX_VALUE)
+        best = min(max(best, lo), MAX_VALUE)
     return int(best)
 
 

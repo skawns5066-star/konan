@@ -202,3 +202,25 @@ def test_ratio_suggestion_waits_for_left_right_fix():
     es = core.build_entries("BT", core.parse_file(BT), P["BT_TOP"])
     e = next(x for x in es if (x.page, x.gid) == (2, "R"))        # 120/210 불일치
     assert e.mismatches() and e.ratio_suggestions() == {}
+
+
+# 2호기 BT 실측(탑1·탑2·바텀) 중 일부: (Value, GV) 점들 — fit_exponents 가 같은 값을 재현하는지 확인
+MEASURED_2R = [[(1, 197), (2, 205), (4, 216), (6, 224)], [(6, 180), (8, 193), (10, 204)], [(5, 181), (7, 192), (9, 205)]]
+MEASURED_3R = [[(700, 77), (740, 80), (760, 82), (780, 84)], [(780, 77), (800, 83), (820, 84)], [(512, 82), (532, 84), (552, 88)]]
+
+
+def test_fitted_exponents_match_defaults_and_hit_tolerance():
+    import fit_exponents as fe
+    assert abs(fe.pooled_exponent(MEASURED_2R) - core.DEFAULT_EXPONENTS[("BT", 1, "R")]) < 0.01
+    assert abs(fe.pooled_exponent(MEASURED_3R) - core.DEFAULT_EXPONENTS[("BT", 2, "R")]) < 0.01
+    # 2번 조명 R(Value 1~10, 한 단계가 GV 약 10~14): 5->7 처럼 정수 한 칸 단위로 목표(탑2 측정점 192)에 도달해야 한다
+    assert core.calc_new_value(5, 181, 192, core.exponent_for("BT", 1, "R")) in (6, 7, 8)
+    # 켜져 있던 조명은 보정 때문에 0(꺼짐)이 되지 않는다
+    assert core.calc_new_value(1, 224, 100, core.exponent_for("BT", 1, "R")) == 1
+
+
+def test_measurement_sheet_reader():
+    import fit_exponents as fe
+    data = fe.read_sheet(os.path.join(HERE, "samples", "measure_BT_2호기.xlsx"))
+    assert len(data) == 7 and all(len(v) == 3 for v in data.values())       # 7개 (조명,색) x 3개 위치
+    assert fe.pooled_exponent(data[("BT", 2, "R")]) and abs(fe.pooled_exponent(data[("BT", 2, "R")]) - 0.21) < 0.01
