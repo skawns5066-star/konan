@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pixel Version="1.0">
+	<Light_Setting LightSetCount="2">
+		<!-- CameraType 0: LineScan,  1: AreaScan-->
+		<LightSet Index="1" CameraType="0" PageCount="3" SelectPage="1" Enable="1">
+			<Page Index="0" ChannelCount="7" Enable="1">
+				<Channel Index="0" Value="35" Angle="0" Color="W" Enable="1"></Channel>
+				<Channel Index="1" Value="105" Angle="30" Color="W" Enable="1"></Channel>
+				<Channel Index="2" Value="105" Angle="30" Color="W" Enable="1"></Channel>
+				<Channel Index="3" Value="105" Angle="60" Color="W" Enable="1"></Channel>
+				<Channel Index="4" Value="105" Angle="60" Color="W" Enable="1"></Channel>
+				<Channel Index="5" Value="500" Angle="75" Color="R" Enable="0"></Channel>
+				<Channel Index="6" Value="500" Angle="75" Color="R" Enable="0"></Channel>
+			</Page>
+			<Page Index="1" ChannelCount="7" Enable="1">
+				<Channel Index="0" Value="1000" Angle="0" Color="W" Enable="0"></Channel>
+				<Channel Index="1" Value="390" Angle="30" Color="W" Enable="1"></Channel>
+				<Channel Index="2" Value="390" Angle="30" Color="W" Enable="1"></Channel>
+				<Channel Index="3" Value="325" Angle="60" Color="W" Enable="1"></Channel>
+				<Channel Index="4" Value="325" Angle="60" Color="W" Enable="1"></Channel>
+				<Channel Index="5" Value="195" Angle="75" Color="R" Enable="1"></Channel>
+				<Channel Index="6" Value="195" Angle="75" Color="R" Enable="1"></Channel>
+			</Page>
+			<Page Index="2" ChannelCount="7" Enable="0">
+				<Channel Index="0" Value="7" Angle="0" Color="W" Enable="1"></Channel>
+				<Channel Index="1" Value="70" Angle="30" Color="W" Enable="1"></Channel>
+				<Channel Index="2" Value="70" Angle="30" Color="W" Enable="1"></Channel>
+				<Channel Index="3" Value="70" Angle="60" Color="W" Enable="1"></Channel>
+				<Channel Index="4" Value="70" Angle="60" Color="W" Enable="1"></Channel>
+				<Channel Index="5" Value="70" Angle="75" Color="R" Enable="1"></Channel>
+				<Channel Index="6" Value="70" Angle="75" Color="R" Enable="1"></Channel>
+			</Page>
+		</LightSet>
+	</Light_Setting>
+</pixel>

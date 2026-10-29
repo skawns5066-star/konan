@@ -3,6 +3,7 @@
 메인 화면(모델명, BT/ABF 탭, + 항목 추가) -> 항목 클릭 -> 파라미터/GV 표 -> 저장 -> 메인 화면 복귀
 계산/파일 처리는 light_spec_core.py 에 있다.
 """
+import os
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
@@ -106,7 +107,7 @@ class App(tk.Tk):
             return
         item = lb.get(sel[0])
         try:
-            path = core.find_item_file(f"{self.base.get().rstrip(chr(92))}\\{model}", item)
+            path = core.find_item_file(os.path.join(self.base.get(), model), item, kind)
             parsed = core.parse_file(path)
         except (OSError, ValueError) as ex:
             messagebox.showerror("파일 로드 실패", str(ex))
@@ -181,7 +182,6 @@ class App(tk.Tk):
             refresh(i)
 
         for i, e in enumerate(entries, start=1):
-            bg = COLOR_BG.get(e.ref.color if e.kind == "BT" else "G")
             ttk.Label(grid, text=f"{e.ref.light}번").grid(row=i, column=0, padx=6, pady=2)
             ttk.Label(grid, text=f"{e.angle}°").grid(row=i, column=1, padx=6)
             for c, color in enumerate(("W", "R", "G", "B"), start=2):
