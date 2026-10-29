@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "2026.10.29-6"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
+VERSION = "2026.10.29-7"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
@@ -59,6 +59,8 @@ class LightRow:
     line_no: int
     span: tuple           # 원본 줄에서 Value 숫자의 (시작, 끝)
     new_value: float = None
+    page_on: bool = True     # Page Enable
+    ch_on: bool = True       # Channel Enable
 
     @property
     def light(self):
@@ -116,8 +118,9 @@ def parse_text(text, path="", encoding="utf-8"):
                 continue
             vm = re.search(r"\bValue\s*=\s*\"([^\"]*)\"", body)
             start = m.start(1) + vm.start(1)
+            ch_on = at.get("Enable", "1") != "0"
             rows.append(LightRow(set_idx, page, int(value) if value == int(value) else value, angle, color,
-                                 page_on and at.get("Enable", "1") != "0", i, (start, start + len(vm.group(1)))))
+                                 page_on and ch_on, i, (start, start + len(vm.group(1))), None, page_on, ch_on))
     return ParsedFile(path, lines, rows, encoding, newline)
 
 
@@ -256,8 +259,10 @@ class Entry:
     cur_gv: float = None
     manual_ok: bool = False
     fixed: bool = False      # 좌/우 불일치를 사용자가 입력한 값으로 통일했는지
+    channels: dict = field(default_factory=dict)   # ABF: GV 측정 채널 {"R": {targets, target, cur_gv, input}, ...}
+    disabled: bool = False   # 페이지(조명)가 사용 안 함(Page Enable=0): 화면에는 보이지만 입력/수정하지 않는다
     light_no: int = 0        # 조명 번호 (화면에서 언어별 라벨을 만들 때 사용)
-    preset_name: str = ""    # 프리셋에 정의된 조명 이름 (예: "DMG 1호"), 없으면 ""
+    preset_name: str = ""    # 프리셋에 정의된 조명 이름 (예: "1호"), 없으면 ""
     ch: str = ""             # GV 기준 채널 (R/G/B/W)
 
     @property
@@ -267,6 +272,8 @@ class Entry:
     def mismatches(self):
         """같은 색·각도의 좌/우 채널 값이 서로 다른 경우 {키: [값들]}. 정상 파일이면 빈 dict."""
         bad = {}
+        if self.disabled:
+            return bad
         for k in self.keys():
             vals = []
             for r in self.rows_of(k):
@@ -278,7 +285,43 @@ class Entry:
 
     @property
     def ok(self):
+        if self.channels:     # ABF: 값을 입력한 채널이 모두 목표 ±허용오차 이내
+            given = self.given_channels()
+            return self.manual_ok or (bool(given) and all(is_ok(c["cur_gv"], c["target"]) for c in given))
         return self.manual_ok or (self.cur_gv is not None and is_ok(self.cur_gv, self.target))
+
+    def given_channels(self):
+        return [c for c in self.channels.values() if c["input"] and c["cur_gv"] is not None]
+
+    def update_combined(self):
+        """ABF: 입력한 채널들(R, G)의 현재 GV/목표 GV 를 기하평균으로 합쳐 cur_gv/target 로 둔다.
+
+        하나의 조명 파라미터 묶음(비율 고정)을 한 배율로 움직이므로, 로그 공간에서 R·G가 요구하는 배율의
+        평균(= 기하평균 비)으로 보정한다. 하나만 입력하면 그 채널 기준.
+        """
+        given = self.given_channels()
+        pool = given or [c for c in self.channels.values() if c["input"]]
+        self.target = math.exp(sum(math.log(c["target"]) for c in pool) / len(pool))
+        self.cur_gv = math.exp(sum(math.log(c["cur_gv"]) for c in given) / len(given)) if given else None
+
+    def predicted_after(self, exponents=None):
+        """보정(new_value)이 채워진 ABF 항목에서 입력 채널별 (예상 GV, 목표 GV). 보정이 없으면 {}."""
+        moved = [r for r in self.rows if r.new_value is not None and r.value > 0 and r.new_value > 0]
+        if not moved or not self.channels:
+            return {}
+        scale = math.exp(sum(math.log(r.new_value / r.value) for r in moved) / len(moved))
+        e = exponent_for(self.kind, self.page, "G", exponents)
+        return {ch: (c["cur_gv"] * scale ** e, c["target"]) for ch, c in self.channels.items()
+                if c["input"] and c["cur_gv"] is not None}
+
+    def set_channel_gv(self, ch, value):
+        self.channels[ch]["cur_gv"] = value if (value is not None and value > 0) else None
+        self.update_combined()
+
+    def set_channel_target(self, ch, value):
+        if value > 0:
+            self.channels[ch]["target"] = value
+            self.update_combined()
 
     def keys(self):
         """사용 중인 (색+각도) 키, 각도 오름차순 (BT 는 색이 하나뿐)."""
@@ -327,7 +370,7 @@ class Entry:
 
         좌/우 값이 다르면(먼저 통일해야 하므로) 규격 비율이 없거나 이미 맞으면 빈 dict.
         """
-        if self.mismatches() or not self.ratio_usable() or self.ratio_matches():
+        if self.disabled or self.mismatches() or not self.ratio_usable() or self.ratio_matches():
             return {}
         anchor = self.anchor_key()
         a = self.rows_of(anchor)[0].value
@@ -348,20 +391,35 @@ class Entry:
         return min(ks, key=lambda k: (self.ratio.get(k, 1e9), ks.index(k)))
 
     def set_material(self, material):
-        if material in self.targets:
-            self.material, self.target = material, self.targets[material]
+        if material not in self.targets:
+            return
+        self.material = material
+        if self.channels:
+            for c in self.channels.values():
+                if material in c["targets"]:
+                    c["target"] = c["targets"][material]
+            self.update_combined()
+        else:
+            self.target = self.targets[material]
 
 
 def build_entries(kind, parsed, preset=None, saved_targets=None, default_target=DEFAULT_TARGET):
     """사용 중(Page·Channel Enable=1)인 채널을 프리셋 규칙에 따라 화면 항목으로 묶는다.
 
     프리셋에 없는 조명(페이지)은 BT: 색별, ABF: 조명별로 묶고 비율/목표는 비워 둔다(현재 비율 유지).
+    ABF 는 페이지가 꺼져 있어도(Page Enable=0) 조명 1~3 이 모두 보이도록 `disabled` 항목으로 포함한다.
+    ABF 항목은 GV 측정 채널(R·G 입력, B 는 목표만 표시)을 가진다.
     """
     lights = (preset or {}).get("lights", {})
     entries = []
-    for page in sorted({(r.set_index, r.page) for r in parsed.rows if r.enable}):
+    if kind == "ABF":
+        pages = sorted({(r.set_index, r.page) for r in parsed.rows if r.ch_on})
+    else:
+        pages = sorted({(r.set_index, r.page) for r in parsed.rows if r.enable})
+    for page in pages:
         set_idx, pg = page
-        rows = [r for r in parsed.rows if r.enable and (r.set_index, r.page) == page]
+        page_off = not any(r.page_on for r in parsed.rows if (r.set_index, r.page) == page)
+        rows = [r for r in parsed.rows if (r.ch_on if page_off else r.enable) and (r.set_index, r.page) == page]
         light = lights.get(str(pg + 1))
         lname = light["name"] if light else f"{pg + 1}호"
         if light:
@@ -376,15 +434,30 @@ def build_entries(kind, parsed, preset=None, saved_targets=None, default_target=
             if not members:
                 continue
             ch = grp.get("gv_channel", grp["id"])
-            label = f"{lname} · {ch}" if kind == "BT" else f"{lname} · {ch} 기준"
+            label = f"{lname} · {ch}" if kind == "BT" else lname
             e = Entry(kind, set_idx, pg, grp["id"], label, members, dict(grp.get("ratio", {})), dict(grp.get("targets", {})))
-            e.light_no, e.preset_name, e.ch = pg + 1, (light["name"] if light else ""), ch
+            e.light_no, e.preset_name, e.ch, e.disabled = pg + 1, (light["name"] if light else ""), ch, page_off
+            if kind == "ABF":
+                gv = grp.get("gv") or {"G": grp.get("targets", {})}
+                e.channels = {c: {"targets": dict(gv.get(c, {})), "target": default_target, "cur_gv": None, "input": c in ("R", "G")}
+                              for c in ("R", "G", "B")}
+                e.targets = dict(gv.get("G") or next((v for v in gv.values() if v), {}))
             if e.targets:
                 e.set_material(next(iter(e.targets)))
             else:
                 e.target = default_target
-            if saved_targets and e.key in saved_targets:
-                e.target = saved_targets[e.key]
+            if saved_targets:
+                if e.channels:
+                    for c, st in e.channels.items():
+                        key = f"{e.key}|{c}"
+                        if key in saved_targets:
+                            e.set_channel_target(c, saved_targets[key])
+                        elif c == "G" and e.key in saved_targets:      # 이전 버전(G 하나만 저장) 호환
+                            e.set_channel_target(c, saved_targets[e.key])
+                elif e.key in saved_targets:
+                    e.target = saved_targets[e.key]
+            if e.channels:
+                e.update_combined()
             entries.append(e)
     return entries
 
@@ -414,7 +487,7 @@ def apply_corrections(entries, exponents=None, align_ratio=True):
     """
     changed = 0
     for e in entries:
-        if e.ok or e.cur_gv is None or not e.rows or e.mismatches():
+        if e.disabled or e.ok or e.cur_gv is None or not e.rows or e.mismatches():
             continue    # 좌/우 값이 다른 항목은 먼저 값을 통일(apply_fixes)한 뒤 재측정해야 한다
         use_ratio = align_ratio and e.ratio_usable()
         anchor = e.anchor_key() if e.ratio else e.keys()[0]
