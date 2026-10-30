@@ -13,7 +13,7 @@ import light_spec_core as core
 import i18n
 from i18n import LANGS, FONT_CANDIDATES, get_lang, set_lang, t
 
-VERSION = "2026.10.29-7"
+VERSION = "2026.10.30-8"
 KIND_TITLE = {"BT": "BT (Strip)", "ABF": "ABF (Unit)"}
 DEFAULT_FONT_SIZE = 18      # 기존(9pt)의 2배
 MIN_FONT, MAX_FONT = 10, 36
@@ -419,33 +419,18 @@ class App(tk.Tk):
         hsb.grid(row=1, column=0, sticky="ew")
         self.bind_all("<MouseWheel>", lambda e: canvas.winfo_exists() and canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
 
-        abf = kind == "ABF"
-        keys = ["c_light", "c_param", "c_ratio", "c_material"] + (["c_chan"] if abf else []) + ["c_target", "c_cur", "c_result"]
-        for c, txt in enumerate([t(k) for k in keys] + ([] if abf else [""])):
+        keys = ["c_light", "c_param", "c_ratio", "c_material", "c_target", "c_cur", "c_result"]
+        for c, txt in enumerate([t(k) for k in keys] + [""]):
             ttk.Label(grid, text=txt, font=self.f_bold).grid(row=0, column=c, padx=6, pady=6)
-        C_CHAN, C_TGT, C_GV, C_ST, C_OK = (4, 5, 6, 7, None) if abf else (None, 4, 5, 6, 7)
         self.update_idletasks()
-        wrap = int(max(self.winfo_width(), 900) * 0.2)       # 파라미터 글이 길면 창 폭의 20%에서 줄바꿈해서 표가 창을 넘지 않게 한다
+        wrap = int(max(self.winfo_width(), 900) * 0.2)    # 파라미터 글이 길면 창 폭의 20%에서 줄바꿈해서 표가 창을 넘지 않게 한다
         ch_bg = {"R": "#ffd6d6", "G": "#d6f5d6", "B": "#d6e4ff"}
 
-        st = []             # 항목별 상태: {"e", "t": {ch: StringVar}, "g": {...}, "lbl": {...}, "ent": {...}}
-        order = []          # GV 입력 순서 (idx, ch): 자동 OK 후 다음 입력칸으로 이동
+        st = []             # 항목별 상태: {"e", "t": {ch: StringVar}, "g": {...}, "lbl": {...}, "ent": {...}, "mat": StringVar}
+        order = []          # GV 입력 순서 (idx, ch): 자동 OK 후 다음 입력칸으로 이동 (ABF 는 G 만)
         fix_vars = {}       # (행 번호, 키) -> StringVar
-        lock_widgets = []   # 비밀번호 해제 전에는 수정할 수 없는 목표 GV 관련 위젯 (위젯, 해제 시 상태)
-
-        def apply_lock():
-            for w, on_state in lock_widgets:
-                w.config(state=on_state if self.unlocked else "disabled")
-            lock_btn.config(text=t("unlocked_target") if self.unlocked else t("unlock_target"))
-
-        def toggle_lock():
-            if self.unlocked:
-                self.unlocked = False
-            elif not self.ask_unlock():
-                return
-            apply_lock()
-
-        lock_btn.config(command=toggle_lock)
+        lock_widgets = []   # 비밀번호 해제 전에는 수정할 수 없는 위젯 (위젯, 해제 시 상태): 목표 GV, 소재, ABF 의 R·B 입력칸
+        side = []           # ABF 의 R·B 입력칸 (idx, ch): 잠그면 비우고 '입력 불필요'로 되돌린다
 
         def num(var):
             try:
@@ -460,30 +445,50 @@ class App(tk.Tk):
             for ch, lbl in d["lbl"].items():
                 if e.channels:
                     c = e.channels[ch]
-                    if not c["input"]:
+                    ref = ch != "G"                      # R·B 는 참고용 판정
+                    if ref and not c["input"]:
                         lbl.config(text=t("st_noinput"), foreground="#999999")
                         continue
                     cur, tgt = c["cur_gv"], c["target"]
                 else:
-                    cur, tgt = e.cur_gv, e.target
-                if e.manual_ok or (cur is not None and core.is_ok(cur, tgt)):
-                    lbl.config(text=t("st_ok"), foreground="#0a7a0a")
+                    ref, cur, tgt = False, e.cur_gv, e.target
+                if (not ref and e.manual_ok) or (cur is not None and core.is_ok(cur, tgt)):
+                    lbl.config(text=t("st_ok_ref" if ref else "st_ok"), foreground="#0a7a0a")
                 elif cur is not None:
-                    lbl.config(text=t("st_fix", d=cur - tgt), foreground="#c00000")
+                    lbl.config(text=t("st_fix_ref" if ref else "st_fix", d=cur - tgt), foreground="#c00000" if not ref else "#a05000")
                 else:
                     lbl.config(text=t("st_blank"), foreground="#777777")
+
+        def apply_lock():
+            for w, on_state in lock_widgets:
+                w.config(state=on_state if self.unlocked else "disabled")
+            for i, ch in side:
+                e = st[i]["e"]
+                e.channels[ch]["input"] = self.unlocked
+                if not self.unlocked:
+                    st[i]["g"][ch].set("")
+                paint(i)
+            lock_btn.config(text=t("unlocked_target") if self.unlocked else t("unlock_target"))
+
+        def toggle_lock():
+            if self.unlocked:
+                self.unlocked = False
+            elif not self.ask_unlock():
+                return
+            apply_lock()
+
+        lock_btn.config(command=toggle_lock)
 
         def refresh(i, ch, from_gv=False):
             d = st[i]
             e = d["e"]
-            if from_gv:
+            if from_gv and ch in (None, "G"):
                 e.manual_ok = False
             if e.channels:
                 v = num(d["t"][ch])
                 if v:
                     e.set_channel_target(ch, v)
-                if d["g"].get(ch) is not None:
-                    e.set_channel_gv(ch, num(d["g"][ch]))
+                e.set_channel_gv(ch, num(d["g"][ch]))
             else:
                 try:
                     e.target = float(d["t"][None].get())
@@ -498,85 +503,82 @@ class App(tk.Tk):
 
         def on_gv(i, ch):
             refresh(i, ch, from_gv=True)
+            if (i, ch) not in order:                  # R·B 참고 입력은 자동 이동하지 않음
+                return
             e = st[i]["e"]
             cur, tgt = (e.channels[ch]["cur_gv"], e.channels[ch]["target"]) if e.channels else (e.cur_gv, e.target)
             if cur is not None and core.is_ok(cur, tgt):
                 pos = order.index((i, ch))
-                if pos + 1 < len(order):           # 자동 OK -> 다음 입력칸(ABF: R -> G -> 다음 조명 R)으로 진행
+                if pos + 1 < len(order):           # 자동 OK -> 다음 입력칸으로 진행
                     ni, nch = order[pos + 1]
                     nxt = st[ni]["ent"][nch]
                     nxt.focus_set()
                     nxt.select_range(0, "end")
-                    canvas.yview_moveto(max(0.0, (ni - 2) / max(len(st), 1)))
+                    canvas.yview_moveto(max(0.0, (st[ni]["row"] - 4) / max(next_row, 1)))
 
         def manual_ok(i):
             st[i]["e"].manual_ok = not st[i]["e"].manual_ok
             paint(i)
 
-        def pick_material(i, cb):
+        def pick_material(i):
             d = st[i]
-            d["e"].set_material(cb.get())
+            d["e"].set_material(d["mat"].get())
             for ch, var in d["t"].items():
                 var.set(str(int(d["e"].channels[ch]["target"] if d["e"].channels else d["e"].target)))
 
         next_row = 1
         for i, e in enumerate(entries):
             ch_list = list(e.channels) if e.channels else [None]
-            r0 = next_row
-            span = len(ch_list)
-            next_row += span
-            off = e.disabled
-            grey = "#8a8a8a" if off else "#000000"
-            lab = self.label_of(e) + (f"\n{t('off_flag')}" if off else "")
-            first = ttk.Frame(grid)                 # 조명 이름 (ABF 는 그 아래에 수동 OK 버튼)
-            first.grid(row=r0, column=0, rowspan=span, padx=6, pady=5, sticky="w")
-            ttk.Label(first, text=lab, foreground=grey).pack(anchor="w")
-            ttk.Label(grid, text=e.param_text(), foreground=grey, wraplength=wrap, justify="left").grid(
-                row=r0, column=1, rowspan=span, padx=6, sticky="w")
-            match = e.ratio_matches()
-            ttk.Label(grid, text=e.ratio_text() + ("" if match is None or off else (" ✓" if match else " ⚠")),
-                      foreground="#c07000" if (match is False and not off) else grey).grid(row=r0, column=2, rowspan=span, padx=6)
-            d = {"e": e, "t": {}, "g": {}, "lbl": {}, "ent": {}}
+            d = {"e": e, "t": {}, "g": {}, "lbl": {}, "ent": {}, "mat": tk.StringVar(value=e.material), "row": next_row}
             st.append(d)
-            if len(e.targets) > 1 and not off:
-                cb = ttk.Combobox(grid, values=list(e.targets), state="disabled", width=6)
-                lock_widgets.append((cb, "readonly"))
-                cb.set(e.material)
-                cb.bind("<<ComboboxSelected>>", lambda ev, k=i, c=cb: pick_material(k, c))
-                cb.grid(row=r0, column=3, rowspan=span, padx=6)
-            else:
-                ttk.Label(grid, text=e.material or "-", foreground=grey).grid(row=r0, column=3, rowspan=span, padx=6)
-            for k, ch in enumerate(ch_list):
-                r = r0 + k
-                if ch is not None:
-                    tk.Label(grid, text=ch, bg=ch_bg[ch], width=3, relief="groove").grid(row=r, column=C_CHAN, padx=6, pady=2)
+            match = e.ratio_matches()
+            ratio_txt = e.ratio_text() + ("" if match is None else (" ✓" if match else " ⚠"))
+            note = f"\n{t('off_flag')}" if e.disabled else ""
+            for ch in ch_list:                      # BT 처럼 한 줄에 하나: 조명/채널, 파라미터, 비율, 소재, 목표, 현재 GV, 판정
+                r = next_row
+                next_row += 1
+                txt = self.label_of(e) + (f" · {ch}" if ch and e.kind == "ABF" else "")
+                if ch is None:
+                    ttk.Label(grid, text=txt + note).grid(row=r, column=0, padx=6, pady=4, sticky="w")
+                else:
+                    tk.Label(grid, text=txt + (note if ch == "G" else ""), bg=ch_bg[ch], padx=6, pady=2, justify="left",
+                             anchor="w").grid(row=r, column=0, padx=6, pady=3, sticky="we")
+                ttk.Label(grid, text=e.param_text(), wraplength=wrap, justify="left").grid(row=r, column=1, padx=6, sticky="w")
+                ttk.Label(grid, text=ratio_txt, foreground="#c07000" if match is False else "#000000").grid(row=r, column=2, padx=6)
+                if len(e.targets) > 1 and ch in (None, "G"):
+                    cb = ttk.Combobox(grid, textvariable=d["mat"], values=list(e.targets), state="disabled", width=6)
+                    lock_widgets.append((cb, "readonly"))
+                    cb.bind("<<ComboboxSelected>>", lambda ev, k=i: pick_material(k))
+                    cb.grid(row=r, column=3, padx=6)
+                else:
+                    if e.material:
+                        ttk.Label(grid, textvariable=d["mat"]).grid(row=r, column=3, padx=6)
+                    else:
+                        ttk.Label(grid, text="-").grid(row=r, column=3, padx=6)
                 tv = tk.StringVar(value=str(int(e.channels[ch]["target"] if ch else e.target)))
                 gv = tk.StringVar()
-                d["t"][ch] = tv
+                d["t"][ch], d["g"][ch] = tv, gv
                 te = ttk.Entry(grid, textvariable=tv, width=6, justify="center", state="disabled")
-                te.grid(row=r, column=C_TGT, padx=6, pady=2)
-                if not off:
-                    lock_widgets.append((te, "normal"))
-                can_input = not off and (ch is None or e.channels[ch]["input"])
-                ge = ttk.Entry(grid, textvariable=gv, width=6, justify="center", state="normal" if can_input else "disabled")
-                ge.grid(row=r, column=C_GV, padx=6, pady=2)
+                te.grid(row=r, column=4, padx=6, pady=2)
+                lock_widgets.append((te, "normal"))
+                drives = ch in (None, "G")             # GV 를 입력해 보정하는 줄 (ABF: G)
+                ge = ttk.Entry(grid, textvariable=gv, width=6, justify="center", state="normal" if drives else "disabled")
+                ge.grid(row=r, column=5, padx=6, pady=2)
                 lbl = ttk.Label(grid, text=t("st_blank"), width=15)
-                lbl.grid(row=r, column=C_ST, padx=6)
+                lbl.grid(row=r, column=6, padx=6)
                 d["lbl"][ch], d["ent"][ch] = lbl, ge
-                if can_input:
-                    d["g"][ch] = gv
+                if drives:
                     order.append((i, ch))
-                    gv.trace_add("write", lambda *_, k=i, c=ch: on_gv(k, c))
-                tv.trace_add("write", lambda *_, k=i, c=ch: refresh(k, c))
-            if off:
-                for ch, lbl in d["lbl"].items():
-                    lbl.config(text=t("off_flag"), foreground="#999999")
-            else:
-                if abf:
-                    ttk.Button(first, text="OK", width=5, command=lambda k=i: manual_ok(k)).pack(anchor="w", pady=(6, 0))
+                    if ch == "G":
+                        ttk.Button(grid, text="OK", width=5, command=lambda k=i: manual_ok(k)).grid(row=r, column=7, padx=6)
                 else:
-                    ttk.Button(grid, text="OK", width=5, command=lambda k=i: manual_ok(k)).grid(row=r0, column=C_OK, rowspan=span, padx=6)
-                paint(i)
+                    lock_widgets.append((ge, "normal"))
+                    side.append((i, ch))
+                gv.trace_add("write", lambda *_, k=i, c=ch: on_gv(k, c))
+                tv.trace_add("write", lambda *_, k=i, c=ch: refresh(k, c))
+            if ch_list == [None]:
+                ttk.Button(grid, text="OK", width=5, command=lambda k=i: manual_ok(k)).grid(row=d["row"], column=7, padx=6)
+            paint(i)
             bad = e.mismatches()
             if bad:     # 좌/우 값이 다른 항목: 줄 바로 아래에 (화면 밖으로 밀리지 않게) 빨간 입력칸을 만든다
                 warn_row = tk.Frame(grid, bg="#ffe3e3", padx=10, pady=4)
@@ -632,9 +634,9 @@ class App(tk.Tk):
                     self.cfg["targets"][f"{prefix}{e.key}|{c}"] = cs["target"]
             else:
                 self.cfg["targets"][prefix + e.key] = e.target
-        pending = [e for i, e in enumerate(entries) if not e.disabled and i not in fixes and not e.ok and e.cur_gv is not None and not e.mismatches()]
-        blank = [e for i, e in enumerate(entries) if not e.disabled and i not in fixes and not e.ok and e.cur_gv is None and not e.mismatches()]
-        skipped = [e for i, e in enumerate(entries) if not e.disabled and (i in fixes or e.mismatches()) and not e.ok and e.cur_gv is not None]
+        pending = [e for i, e in enumerate(entries) if i not in fixes and not e.ok and e.cur_gv is not None and not e.mismatches()]
+        blank = [e for i, e in enumerate(entries) if i not in fixes and not e.ok and e.cur_gv is None and not e.mismatches()]
+        skipped = [e for i, e in enumerate(entries) if (i in fixes or e.mismatches()) and not e.ok and e.cur_gv is not None]
         if not pending and not fixes:
             if unresolved:
                 self.warn(t("save_title"), t("need_fix_values"))
@@ -655,17 +657,10 @@ class App(tk.Tk):
             msg += t("msg_unresolved", n=len(unresolved))
         if skipped:
             msg += t("msg_skipped", n=len(skipped))
-        # 미리 계산해 두고, ABF 에서 R·G 가 한 번에 둘 다 맞지 않을 조명이 있으면 확인창에서 알려준다
+        # 미리 계산해 두고(확인창에서 취소하면 되돌린다) 저장 때 그대로 쓴다
         core.apply_corrections([e for i, e in enumerate(entries) if i not in fixes], self.exponents, self.align.get())
         for idx, fx in fixes.items():
             core.apply_fixes(entries[idx], fx)
-        unbalanced = []
-        for e in entries:
-            for ch, (pred, tgt) in e.predicted_after(self.exponents).items():
-                if not core.is_ok(pred, tgt):
-                    unbalanced.append(f"{self.label_of(e)} {ch} {pred:.0f}/{tgt:.0f}")
-        if unbalanced:
-            msg += t("msg_unbalanced", detail=", ".join(unbalanced))
         msg += t("msg_backup", yn=t("backup_yes") if self.backup.get() else t("backup_no"))
         if not self.ask_yes_no(t("confirm_title"), msg):
             for r in parsed.rows:       # 취소: 미리 계산한 값을 되돌린다

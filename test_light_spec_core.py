@@ -1,4 +1,3 @@
-import math
 import os
 import shutil
 import tempfile
@@ -43,21 +42,20 @@ def test_material_changes_target():
     assert e.target == 195
 
 
-def test_abf_all_three_lights_shown_disabled_page_flagged():
+def test_abf_all_three_lights_shown_and_page_off_light_still_correctable():
     es = core.build_entries("ABF", core.parse_file(ABF), P["ABF_TOP"])
-    assert [(e.light_no, e.disabled) for e in es] == [(1, False), (2, False), (3, True)]   # 3호는 Page Enable=0: 보이되 입력 불가
+    assert [(e.light_no, e.disabled) for e in es] == [(1, False), (2, False), (3, True)]   # 3호: 파일에서 Page Enable=0 (안내만)
     assert es[1].param_text() == "R75°=195 · W30°=390 · W60°=325"
     assert {r.color for r in es[1].rows} == {"W", "R"}
-    assert es[2].mismatches() == {} and es[2].ratio_suggestions() == {}                     # 사용 안 하는 조명은 경고하지 않는다
     e = es[2]
-    e.channels["G"]["cur_gv"] = 100
-    assert core.apply_corrections(es) == 0 and all(r.new_value is None for r in e.rows)    # 수정 대상 아님
+    e.set_channel_gv("G", 100)                                                               # 꺼진 페이지여도 G 입력 -> 보정 가능
+    assert core.apply_corrections(es) == 1 and all(r.new_value and r.new_value > r.value for r in e.rows)
 
 
-def test_abf_channels_targets_from_spec_and_blue_has_no_input():
+def test_abf_channels_targets_from_spec_and_only_g_is_input_by_default():
     es = core.build_entries("ABF", core.parse_file(ABF), P["ABF_TOP"])
     t1 = {c: (v["target"], v["input"]) for c, v in es[0].channels.items()}
-    assert t1 == {"R": (255, True), "G": (200, True), "B": (130, False)}            # 규격표 OSP: R 255 / G 200 / B 130
+    assert t1 == {"R": (255, False), "G": (200, True), "B": (130, False)}            # 규격표 OSP: R 255 / G 200 / B 130
     es[0].set_material("SOP")
     assert [es[0].channels[c]["target"] for c in "RGB"] == [145, 150, 130]
     assert [v["target"] for v in es[1].channels.values()] == [95, 105, 120]          # 2호 SR: 90~95 / 100~105 / 110~120 -> 큰 값
@@ -65,21 +63,18 @@ def test_abf_channels_targets_from_spec_and_blue_has_no_input():
     assert [bot[0].channels[c]["target"] for c in "RGB"] == [250, 225, 135]
 
 
-def test_abf_ok_requires_every_entered_channel_and_combines_rg():
+def test_abf_correction_is_driven_by_g_only():
     e = core.build_entries("ABF", core.parse_file(ABF), P["ABF_TOP"])[0]
     assert not e.ok
-    e.set_channel_gv("R", 250)
-    assert e.ok                                    # R만 입력해도 판정 (255±10)
-    e.set_channel_gv("G", 150)
-    assert not e.ok                                # G 가 200±10 밖
+    e.set_channel_gv("R", 120)                     # R 은 목표(255)와 한참 달라도 (참고용 입력) 판정/보정에 영향 없음
+    assert not e.ok and e.cur_gv is None
     e.set_channel_gv("G", 195)
-    assert e.ok
+    assert e.ok and e.target == 200
     e.set_channel_gv("G", 150)
-    es = [e]
-    assert core.apply_corrections(es) == 1
-    pred = e.predicted_after()
-    assert set(pred) == {"R", "G"} and pred["R"][0] > 255 + core.TOLERANCE      # R·G를 한 배율로 움직이므로 한쪽은 벗어난다 -> 경고 대상
-    assert abs(e.target - math.sqrt(255 * 200)) < 1e-6                           # 합친 목표 = 기하평균
+    assert not e.ok and e.cur_gv == 150
+    assert core.apply_corrections([e]) == 1
+    g_new = {r.new_value for r in e.rows if r.color == "W" and r.angle == 30}
+    assert g_new and next(iter(g_new)) > 105       # G 만 보고 올림 (R=120 은 무시)
 
 
 def test_names_have_no_dmg():

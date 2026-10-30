@@ -2,7 +2,7 @@
 
 t("키", 이름=값, ...) 로 현재 언어의 문구를 가져온다. 새 문구는 TEXT 에 세 언어를 함께 추가한다.
 """
-VERSION = "2026.10.29-7"
+VERSION = "2026.10.30-8"
 LANGS = {"ko": "한국어", "zh": "繁體中文", "vi": "Tiếng Việt"}
 _lang = "ko"
 
@@ -98,8 +98,10 @@ TEXT = {
     "c_target": ("목표 GV", "目標 GV", "GV mục tiêu"),
     "c_cur": ("현재 GV", "目前 GV", "GV hiện tại"),
     "c_chan": ("GV 채널", "GV 通道", "Kênh GV"),
+    "st_ok_ref": ("OK (참고)", "OK（參考）", "OK (tham khảo)"),
+    "st_fix_ref": ("{d:+.0f} (참고)", "{d:+.0f}（參考）", "{d:+.0f} (tham khảo)"),
     "st_noinput": ("입력 불필요", "無需輸入", "Không cần nhập"),
-    "off_flag": ("(사용 안 함)", "（未使用）", "(không dùng)"),
+    "off_flag": ("(파일에서 꺼짐)", "（檔案中已關閉）", "(đang tắt trong tệp)"),
     "c_result": ("판정", "判定", "Kết quả"),
     "c_fix": ("좌/우 불일치 수정", "左／右不一致修正", "Sửa lệch trái/phải"),
     "st_blank": ("미입력", "未輸入", "Chưa nhập"),
@@ -136,9 +138,6 @@ TEXT = {
     "msg_skipped": ("⚠ 값을 수정하거나 아직 불일치인 항목 {n}개는 GV 보정에서 제외됩니다 (수정 후 재측정).\n",
                     "⚠ 需修改數值或仍不一致的 {n} 個項目，將不進行 GV 校正（修改後請重新量測）。\n",
                     "⚠ {n} mục cần sửa giá trị hoặc còn lệch sẽ không hiệu chỉnh GV (hãy đo lại sau khi sửa).\n"),
-    "msg_unbalanced": ("⚠ R·G가 같은 배율로 함께 움직이므로 한 번에 둘 다 목표에 맞지 않을 수 있습니다 (예상 GV/목표: {detail}). 보정 후 다시 측정하세요.\n",
-                       "⚠ R、G 會以同一倍率一起變動，可能無法一次同時達到目標（預估 GV／目標：{detail}）。校正後請重新量測。\n",
-                       "⚠ R và G thay đổi cùng một tỷ lệ nên có thể không đạt cả hai mục tiêu trong một lần (GV dự kiến/mục tiêu: {detail}). Hãy đo lại sau khi hiệu chỉnh.\n"),
     "msg_backup": ("백업: {yn}\n계속할까요?", "備份：{yn}\n要繼續嗎？", "Sao lưu: {yn}\nTiếp tục?"),
     "backup_yes": ("함", "是", "Có"),
     "backup_no": ("안 함", "否", "Không"),
