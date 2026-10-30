@@ -273,3 +273,29 @@ def test_clean_group_keeps_clean_series_untouched():
     import fit_exponents as fe
     s, d = fe.clean_group(MEASURED_2R)
     assert d == [] and [sorted(x) for x in MEASURED_2R] == s
+
+
+ABF_2HO_XML = """<pixel><Light_Setting><LightSet Index="1">
+<Page Index="1" ChannelCount="4" Enable="1">
+<Channel Index="0" Value="100" Angle="0" Color="W" Enable="1"></Channel>
+<Channel Index="1" Value="200" Angle="30" Color="W" Enable="1"></Channel>
+<Channel Index="2" Value="200" Angle="60" Color="W" Enable="1"></Channel>
+<Channel Index="3" Value="195" Angle="75" Color="R" Enable="0"></Channel>
+</Page></LightSet></Light_Setting></pixel>"""
+
+
+def test_abf_ratio_checked_even_when_file_has_channel_not_in_spec():
+    """ABF 2호 규격은 W30:W60:R75 = 6:5:3. 파일에는 W0°(규격에 없음)가 켜져 있고 R75°는 꺼져 있다."""
+    pf = core.parse_text(ABF_2HO_XML)
+    e = core.build_entries("ABF", pf, P["ABF_TOP"])[0]
+    assert e.spec_keys() == ["W30", "W60"] and e.ratio_usable()
+    assert e.ratio_matches() is False                                  # 200:200 은 6:5 가 아니다
+    assert e.ratio_suggestions() == {"W30": 240}                       # 기준(비율 5)=W60 은 그대로, W30 을 240 으로 유도
+    core.apply_fixes(e, {"W30": 240})
+    assert [(r.angle, r.new_value) for r in e.rows if r.new_value] == [(30, 240)]
+    # GV 보정 시: 규격에 없는 W0° 는 현재 비율대로 같이 움직이고, 규격 키는 6:5 로 맞춰진다
+    e2 = core.build_entries("ABF", pf, P["ABF_TOP"])[0]
+    e2.set_channel_gv("G", 70)
+    assert core.apply_corrections([e2]) == 1
+    nv = {(r.angle): r.new_value for r in e2.rows if r.new_value}
+    assert abs(nv[30] / nv[60] - 6 / 5) < 0.02 and nv[0] / nv[60] - 0.5 < 0.02

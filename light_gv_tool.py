@@ -13,7 +13,7 @@ import light_spec_core as core
 import i18n
 from i18n import LANGS, FONT_CANDIDATES, get_lang, set_lang, t
 
-VERSION = "2026.10.30-8"
+VERSION = "2026.10.30-9"
 KIND_TITLE = {"BT": "BT (Strip)", "ABF": "ABF (Unit)"}
 DEFAULT_FONT_SIZE = 18      # 기존(9pt)의 2배
 MIN_FONT, MAX_FONT = 10, 36

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "2026.10.30-8"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
+VERSION = "2026.10.30-9"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
@@ -325,9 +325,14 @@ class Entry:
             return "-"
         return ":".join(str(self.ratio[k]) for k in self.keys() if k in self.ratio)
 
+    def spec_keys(self):
+        """사용 중인 키 중 규격(프리셋)에 비율이 정해진 키. 규격에 없는 채널(예: 2호에 켜져 있는 W0°)은 제외."""
+        return [k for k in self.keys() if self.ratio.get(k, 0) > 0]
+
     def ratio_usable(self):
-        """사용 중인 모든 키에 프리셋 비율이 있으면 프리셋 비율로 재구성 가능."""
-        return bool(self.ratio) and all(self.ratio.get(k, 0) > 0 for k in self.keys())
+        """규격 비율이 정해진 키가 하나라도 있으면 그 키들로 비율을 점검/재구성할 수 있다.
+        (규격에 없는 채널은 점검하지 않고, 보정 때는 같은 배율로 따라 움직인다)"""
+        return bool(self.spec_keys())
 
     def ratio_matches(self, tol=0.08):
         """현재 파일 값이 프리셋 비율과 맞는지 (앵커 대비 ±8%)."""
@@ -337,7 +342,7 @@ class Entry:
         a = self.rows_of(anchor)[0].value
         if a <= 0:
             return False
-        for k in self.keys():
+        for k in self.spec_keys():
             want = a * self.ratio[k] / self.ratio[anchor]
             for r in self.rows_of(k):
                 if abs(r.value - want) > max(1.0, want * tol):
@@ -356,7 +361,7 @@ class Entry:
         if a <= 0:
             return {}
         out = {}
-        for k in self.keys():
+        for k in self.spec_keys():
             if k == anchor:
                 continue
             want = a * self.ratio[k] / self.ratio[anchor]
@@ -476,7 +481,10 @@ def apply_corrections(entries, exponents=None, align_ratio=True):
         exp = exponent_for(e.kind, e.page, next((g for g in [e.gid] if g in COLORS), "G"), exponents)
         new_a = calc_new_value(arow.value, e.cur_gv, e.target, exp)
         # 가장 큰 채널이 MAX_VALUE 를 넘지 않도록 앵커를 제한 (넘으면 비율이 깨지므로 클램프 대신 전체를 축소)
-        top = max(e.ratio[k] for k in e.keys()) / e.ratio[anchor] if use_ratio else max(r.value for r in e.rows) / arow.value
+        def factor(r):      # 앵커 대비 이 채널의 배수: 규격 비율이 있으면 그 비율, 없으면(규격에 없는 채널) 현재 비율
+            k = rkey(r.color, r.angle)
+            return e.ratio[k] / e.ratio[anchor] if use_ratio and e.ratio.get(k, 0) > 0 else r.value / arow.value
+        top = max(factor(r) for r in e.rows)
         new_a = min(new_a, int(MAX_VALUE / top))
         if new_a == arow.value and not use_ratio:
             continue
@@ -485,8 +493,7 @@ def apply_corrections(entries, exponents=None, align_ratio=True):
         for r in e.rows:
             if r.value == 0:
                 continue
-            k = rkey(r.color, r.angle)
-            nv = new_a * e.ratio[k] / e.ratio[anchor] if use_ratio else r.value * scale
+            nv = new_a * factor(r) if use_ratio and e.ratio.get(rkey(r.color, r.angle), 0) > 0 else r.value * scale
             r.new_value = min(MAX_VALUE, max(1, round(nv)))
             any_change |= r.new_value != r.value
         if not any_change:
