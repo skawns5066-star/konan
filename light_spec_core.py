@@ -5,6 +5,7 @@
   - 같은 각도·색의 채널이 좌/우로 2개씩 있으므로(예: 30° 두 개) 한 항목으로 묶어 같이 바꾼다.
   - 저장은 Value="..." 숫자만 제자리 치환하므로 나머지 XML(주석, 탭, 줄바꿈, 인코딩)은 그대로 보존된다.
 """
+import csv
 import hashlib
 import hmac
 import json
@@ -12,11 +13,12 @@ import math
 import os
 import re
 import shutil
+import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "2026.10.30-9"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
+VERSION = "2026.10.31-10"   # 프로그램 파일(5개)이 모두 같은 버전인지 확인용. 수정할 때마다 세 파일을 같이 올린다.
 BASE_DIR = r"D:\PxInventory\LIGHT_SPEC"
 TOLERANCE = 10          # 목표 GV ± 10 이내면 OK
 DEFAULT_TARGET = 100    # 목표 GV 기본값 (프리셋/각도/행별로 수정 가능)
@@ -261,6 +263,9 @@ class Entry:
     fixed: bool = False      # 좌/우 불일치를 사용자가 입력한 값으로 통일했는지
     channels: dict = field(default_factory=dict)   # ABF: GV 측정 채널 {"R": {targets, target, cur_gv, input}, ...}
     disabled: bool = False   # 파일에서 페이지(조명)가 꺼져 있음(Page Enable=0): 화면에 안내만 하고 보정은 그대로 가능
+    attempt: int = 1         # 이 조명의 몇 번째 시도(측정→보정)인지: 보정이 한 번 이루어질 때마다 +1, OK 가 되면 1로 초기화
+    prev_gv: float = None    # 직전 시도에서 입력했던 GV (화면 안내/로그용)
+    ok_logged: bool = False  # 이미 OK 로 기록된 조명(저장 후 같은 화면에서 유지 중): 다시 기록하지 않는다
     light_no: int = 0        # 조명 번호 (화면에서 언어별 라벨을 만들 때 사용)
     preset_name: str = ""    # 프리셋에 정의된 조명 이름 (예: "1호"), 없으면 ""
     ch: str = ""             # GV 기준 채널 (R/G/B/W)
@@ -309,14 +314,15 @@ class Entry:
     def rows_of(self, key):
         return [r for r in self.rows if rkey(r.color, r.angle) == key]
 
-    def param_text(self):
-        """표시용 현재 파라미터. 좌/우 값이 다르면 '120/210'. 예: R0°=1 · R30°=4"""
+    def param_text(self, after=False):
+        """표시용 현재 파라미터. 좌/우 값이 다르면 '120/210'. 예: R0°=1 · R30°=4  (after=True: 보정 후 값)"""
         out = []
         for k in self.keys():
             vals = []
             for r in self.rows_of(k):
-                if r.value not in vals:
-                    vals.append(r.value)
+                v = r.new_value if (after and r.new_value is not None) else r.value
+                if v not in vals:
+                    vals.append(v)
             out.append(f"{k[0]}{k[1:]}°={'/'.join(str(v) for v in vals)}")
         return " · ".join(out)
 
@@ -463,6 +469,11 @@ def apply_fixes(entry, fixes):
     return n
 
 
+def entry_exponent(e, exponents=None):
+    """항목(조명 묶음)의 반응 지수. BT 는 색(gid), ABF 는 G 기준."""
+    return exponent_for(e.kind, e.page, next((g for g in [e.gid] if g in COLORS), "G"), exponents)
+
+
 def apply_corrections(entries, exponents=None, align_ratio=True):
     """OK가 아니고 현재 GV가 입력된 항목의 new_value를 채운다. 변경된 항목 수 반환.
 
@@ -478,7 +489,7 @@ def apply_corrections(entries, exponents=None, align_ratio=True):
         arow = e.rows_of(anchor)[0]
         if arow.value <= 0:
             continue
-        exp = exponent_for(e.kind, e.page, next((g for g in [e.gid] if g in COLORS), "G"), exponents)
+        exp = entry_exponent(e, exponents)
         new_a = calc_new_value(arow.value, e.cur_gv, e.target, exp)
         # 가장 큰 채널이 MAX_VALUE 를 넘지 않도록 앵커를 제한 (넘으면 비율이 깨지므로 클램프 대신 전체를 축소)
         def factor(r):      # 앵커 대비 이 채널의 배수: 규격 비율이 있으면 그 비율, 없으면(규격에 없는 채널) 현재 비율
@@ -542,3 +553,81 @@ def save_config(cfg):
         config_path().write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------- 튜닝 시도 로그 (알고리즘 개선용 학습 데이터)
+VERSION_FOR_LOG = VERSION
+LOG_FIELDS = ["time", "pc", "version", "model", "kind", "item", "file", "light", "ch", "key", "material", "attempt", "action",
+              "target_gv", "cur_gv", "gv_ok", "prev_gv", "r_gv", "b_gv", "exponent", "align_ratio", "ratio",
+              "anchor", "anchor_before", "anchor_after", "scale", "params_before", "params_after"]
+TUNING_TTL_H = 12      # 이 시간이 지난 미완료 시도 기록은 새 작업으로 보고 1차 시도부터 다시 센다
+
+
+def log_path():
+    """로그 파일: 프로그램 폴더의 logs/tuning_log.csv (쓸 수 없으면 사용자 폴더의 light_gv_logs/). Excel 에서 바로 열린다."""
+    for d in (Path(__file__).resolve().parent / "logs", Path(os.path.expanduser("~")) / "light_gv_logs"):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            probe = d / ".w"
+            probe.write_text("", encoding="utf-8")
+            probe.unlink()
+            return d / "tuning_log.csv"
+        except OSError:
+            continue
+    return None
+
+
+def build_log_row(e, action, meta, exponents=None, align_ratio=True):
+    """한 조명(항목)의 이번 시도 기록 한 줄. 보정/수정이 적용된(new_value 가 채워진) 상태에서 호출한다.
+    action: ok(목표 도달) | ok_manual(수동 OK) | correct(보정 적용) | no_change(보정했지만 값이 안 바뀜) | fix(좌우/비율 직접 수정)"""
+    anchor = e.anchor_key() if e.ratio else (e.keys()[0] if e.keys() else "")
+    arow = e.rows_of(anchor)[0] if anchor else None
+    before = arow.value if arow else ""
+    after = (arow.new_value if arow and arow.new_value is not None else before)
+    ref = {c: v["cur_gv"] for c, v in e.channels.items() if c != "G"} if e.channels else {}
+    return {
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "pc": socket.gethostname(), "version": VERSION_FOR_LOG,
+        "model": meta.get("model", ""), "kind": e.kind, "item": meta.get("item", ""), "file": meta.get("file", ""),
+        "light": e.light_no, "ch": e.ch, "key": e.key, "material": e.material, "attempt": e.attempt, "action": action,
+        "target_gv": round(e.target, 2), "cur_gv": "" if e.cur_gv is None else round(e.cur_gv, 2),
+        "gv_ok": "" if e.cur_gv is None else int(is_ok(e.cur_gv, e.target)),
+        "prev_gv": "" if e.prev_gv is None else round(e.prev_gv, 2),
+        "r_gv": ref.get("R") or "", "b_gv": ref.get("B") or "",
+        "exponent": round(entry_exponent(e, exponents), 3), "align_ratio": int(bool(align_ratio)), "ratio": e.ratio_text(),
+        "anchor": anchor, "anchor_before": before, "anchor_after": after,
+        "scale": round(after / before, 4) if before and after != "" else "",
+        "params_before": e.param_text(), "params_after": e.param_text(after=True),
+    }
+
+
+def append_log(rows):
+    """CSV 에 행을 추가한다 (파일이 없으면 헤더 포함, Excel 한글용 UTF-8 BOM). 쓴 경로 또는 None."""
+    path = log_path()
+    if not path or not rows:
+        return None
+    try:
+        new = not path.exists() or path.stat().st_size == 0
+        with open(path, "a", newline="", encoding="utf-8-sig" if new else "utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore")
+            if new:
+                w.writeheader()
+            w.writerows(rows)
+        return path
+    except OSError:
+        return None
+
+
+def tuning_state(cfg, key, now=None):
+    """저장된 미완료 시도 기록(만료되면 버림). {'n': 지금까지 보정 횟수, 'prev_gv': 직전 입력 GV, 't': 시각}"""
+    rec = cfg.get("tuning", {}).get(key)
+    if not rec:
+        return None
+    now = now or datetime.now()
+    try:
+        if (now - datetime.fromisoformat(rec["t"])).total_seconds() > TUNING_TTL_H * 3600:
+            cfg["tuning"].pop(key, None)
+            return None
+    except (KeyError, ValueError):
+        cfg["tuning"].pop(key, None)
+        return None
+    return rec

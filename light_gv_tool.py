@@ -7,13 +7,14 @@
 import os
 import re
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, font as tkfont, ttk
 
 import light_spec_core as core
 import i18n
 from i18n import LANGS, FONT_CANDIDATES, get_lang, set_lang, t
 
-VERSION = "2026.10.30-9"
+VERSION = "2026.10.31-10"
 KIND_TITLE = {"BT": "BT (Strip)", "ABF": "ABF (Unit)"}
 DEFAULT_FONT_SIZE = 18      # 기존(9pt)의 2배
 MIN_FONT, MAX_FONT = 10, 36
@@ -121,8 +122,10 @@ class App(tk.Tk):
             kind, page, color = k.split("|")
             self.exponents[(kind, int(page), color)] = float(v)
         self.unlocked = False      # 목표 GV 수정 잠금 해제 상태 (화면을 벗어나면 다시 잠김)
+        self.fit_fn, self._fit_job = None, None
         self.container = ttk.Frame(self)
         self.container.pack(fill="both", expand=True)
+        self.container.bind("<Configure>", self._on_resize)
         self.show_main()
         self.after(300, self.check_versions)
 
@@ -141,11 +144,9 @@ class App(tk.Tk):
     # ------------------------------------------------------------ 창 / 글꼴
     def setup_window(self):
         w, h = self.winfo_screenwidth(), self.winfo_screenheight()
-        self.geometry(f"{int(w * 0.95)}x{int(h * 0.9)}+{int(w * 0.025)}+{int(h * 0.03)}")
-        try:
-            self.state("zoomed")      # Windows: 최대화
-        except tk.TclError:
-            pass
+        ww, hh = w // 2, h // 2       # 화면 면적의 1/4: 다른 작업과 나란히 쓰는 창 모드
+        self.geometry(f"{ww}x{hh}+{(w - ww) // 2}+{(h - hh) // 2}")
+        self.minsize(640, 420)
 
     def setup_fonts(self):
         self.base_fonts = [tkfont.nametofont(n) for n in (
@@ -154,11 +155,11 @@ class App(tk.Tk):
         self.option_add("*TCombobox*Listbox.font", self.base_fonts[0])
         self.apply_fonts()
 
-    def apply_fonts(self):
-        """언어에 맞는 글꼴(설치된 첫 후보)과 저장된 글자 크기를 모든 화면에 적용."""
+    def apply_fonts(self, size=None):
+        """언어에 맞는 글꼴(설치된 첫 후보)과 글자 크기(기본: 저장된 값)를 모든 화면에 적용."""
         have = set(tkfont.families())
         family = next((f for f in FONT_CANDIDATES[get_lang()] if f in have), self.base_fonts[0].actual("family"))
-        size = int(self.cfg.get("font_size", DEFAULT_FONT_SIZE))
+        size = size or int(self.cfg.get("font_size", DEFAULT_FONT_SIZE))
         for f in self.base_fonts:
             f.configure(family=family, size=size)
         self.f_bold.configure(family=family, size=size, weight="bold")
@@ -169,6 +170,24 @@ class App(tk.Tk):
         self.cfg["font_size"] = size
         self.apply_fonts()
         core.save_config(self.cfg)
+        if self.fit_fn:
+            self.after(50, self.fit_fn)
+
+    def autofit(self, need, avail):
+        """창이 작으면(기본은 화면의 1/4) 이 화면에서만 글자를 줄여 내용이 들어가게 한다.
+        저장된 글자 크기(A−/A+)에서 시작해 need() <= avail() 가 될 때까지 1pt씩 줄이며, 창을 키우면 다시 커진다."""
+        size0 = int(self.cfg.get("font_size", DEFAULT_FONT_SIZE))
+        for size in range(size0, MIN_FONT - 1, -1):
+            self.apply_fonts(size)
+            self.update_idletasks()
+            if need() <= avail():
+                break
+
+    def _on_resize(self, event):
+        if self.fit_fn:
+            if self._fit_job:
+                self.after_cancel(self._fit_job)
+            self._fit_job = self.after(250, self.fit_fn)
 
     def change_lang(self):
         set_lang(self.lang_var.get())
@@ -237,6 +256,7 @@ class App(tk.Tk):
         self.info(t("pwc_title"), t("pwc_done"))
 
     def clear(self):
+        self.fit_fn = None
         self.unbind_all("<MouseWheel>")
         for w in self.container.winfo_children():
             w.destroy()
@@ -251,26 +271,25 @@ class App(tk.Tk):
     def show_main(self):
         self.unlocked = False
         self.clear()
+        self.apply_fonts()
         top = ttk.Frame(self.container, padding=8)
         top.pack(fill="x")
-        top.columnconfigure(3, weight=1)
-        ttk.Label(top, text=t("model_name")).grid(row=0, column=0, sticky="w")
-        ent = ttk.Entry(top, textvariable=self.model, width=18)
-        ent.grid(row=0, column=1, padx=6)
-        ent.focus_set()
-        ttk.Label(top, text=t("model_example")).grid(row=0, column=2, sticky="w")
-        ttk.Label(top, text=t("base_path")).grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(top, textvariable=self.base, width=32).grid(row=1, column=1, columnspan=2, sticky="we", padx=6, pady=(6, 0))
-
-        # 언어 선택: 지구본 아이콘 + 세 언어 이름(각자의 글자)을 항상 보이게 나열
-        lang = tk.LabelFrame(top, text=t("lang_box"), font=self.f_bold, padx=8, pady=6, bd=3, relief="groove")
-        lang.grid(row=0, column=3, rowspan=3, sticky="ne", padx=(10, 0))
+        # 언어 선택: 지구본 아이콘 + 세 언어 이름(각자의 글자)을 맨 위 줄에 항상 보이게 나열
+        lang = tk.LabelFrame(top, text=t("lang_box"), font=self.f_bold, padx=8, pady=4, bd=3, relief="groove")
+        lang.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
         for code, name in LANGS.items():
             tk.Radiobutton(lang, text=name, variable=self.lang_var, value=code, indicatoron=False,
-                           command=self.change_lang, padx=14, pady=6, selectcolor="#9ccbff", bd=2).pack(side="left", padx=3)
+                           command=self.change_lang, padx=14, pady=4, selectcolor="#9ccbff", bd=2).pack(side="left", padx=3)
+        ttk.Label(top, text=t("model_name")).grid(row=1, column=0, sticky="w")
+        ent = ttk.Entry(top, textvariable=self.model, width=18)
+        ent.grid(row=1, column=1, padx=6)
+        ent.focus_set()
+        ttk.Label(top, text=t("model_example")).grid(row=1, column=2, sticky="w")
+        ttk.Label(top, text=t("base_path")).grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(top, textvariable=self.base, width=32, state="readonly").grid(row=2, column=1, columnspan=2, sticky="we", padx=6, pady=(6, 0))
 
         tools = ttk.Frame(top)
-        tools.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        tools.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
         ttk.Label(tools, text=t("default_target")).pack(side="left")
         spin = ttk.Spinbox(tools, from_=0, to=255, textvariable=self.default_target, width=5, state="disabled")
         spin.pack(side="left", padx=6)
@@ -284,7 +303,7 @@ class App(tk.Tk):
         unlock_btn = ttk.Button(tools, text=t("unlock_target"), command=toggle_main_lock)
         unlock_btn.pack(side="left", padx=6)
         tools2 = ttk.Frame(top)
-        tools2.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        tools2.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
         ttk.Button(tools2, text=t("change_pw"), command=self.change_password).pack(side="left")
         ttk.Label(tools2, text="    " + t("font_size")).pack(side="left")
         ttk.Button(tools2, text="A−", width=3, command=lambda: self.change_font(-2)).pack(side="left", padx=(6, 2))
@@ -294,6 +313,14 @@ class App(tk.Tk):
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for kind in ("BT", "ABF"):
             nb.add(self.build_kind_tab(nb, kind), text=f" {KIND_TITLE[kind]} ")
+
+        def fit():
+            try:
+                self.autofit(top.winfo_reqwidth, lambda: self.container.winfo_width() - 8)
+            except tk.TclError:
+                pass       # 화면이 이미 바뀐 뒤 늦게 실행된 경우
+        self.fit_fn = fit
+        self.after(100, fit)
 
     def build_kind_tab(self, parent, kind):
         tab = ttk.Frame(parent, padding=8)
@@ -374,25 +401,37 @@ class App(tk.Tk):
         except (OSError, ValueError) as ex:
             self.error(t("load_fail"), self.err_text(ex))
             return
+        self.ctx = {"kind": kind, "item": item, "model": model, "preset": preset}
+        self.enter_table(parsed, popups=True)
+
+    def enter_table(self, parsed, carry=None, popups=True):
+        """파일 내용으로 표 화면을 만든다. 저장 후에도 같은 화면에 머물도록 다시 호출된다(popups=False, carry=OK 상태)."""
+        c = self.ctx
+        kind, item, model = c["kind"], c["item"], c["model"]
         prefix = f"{model}|{kind}|{item['name']}|"
         saved = {k[len(prefix):]: v for k, v in self.cfg["targets"].items() if k.startswith(prefix)}
-        entries = core.build_entries(kind, parsed, preset, saved, self.default_target.get())
+        entries = core.build_entries(kind, parsed, c["preset"], saved, self.default_target.get())
         if not entries:
             self.info(t("no_items_title"), t("no_channels"))
             return
+        for e in entries:                       # 몇 번째 시도인지: 보정이 이루어진 횟수 + 1 (OK 가 되면 1로 초기화)
+            rec = core.tuning_state(self.cfg, prefix + e.key)
+            if rec:
+                e.attempt, e.prev_gv = int(rec["n"]) + 1, rec.get("prev_gv")
         self.persist()
-        bad = [(e, k, v) for e in entries for k, v in e.mismatches().items()]
-        if bad:
-            lines = "\n".join(f"  · {self.label_of(e)}  {k[0]}{k[1:]}°: {' / '.join(str(x) for x in v)}" for e, k, v in bad)
-            self.warn(t("mm_title"), t("mm_msg", n=len(bad), lines=lines))
-        rat = [(e, k, v) for e in entries for k, v in e.ratio_suggestions().items()]
-        if rat:
-            lines = "\n".join(f"  · {self.label_of(e)}  {k[0]}{k[1:]}°: {e.rows_of(k)[0].value} → {v}" for e, k, v in rat)
-            self.warn(t("rt_title"), t("rt_msg", n=len(rat), lines=lines))
-        self.show_table(kind, item["name"], parsed, entries, prefix)
+        if popups:
+            bad = [(e, k, v) for e in entries for k, v in e.mismatches().items()]
+            if bad:
+                lines = "\n".join(f"  · {self.label_of(e)}  {k[0]}{k[1:]}°: {' / '.join(str(x) for x in v)}" for e, k, v in bad)
+                self.warn(t("mm_title"), t("mm_msg", n=len(bad), lines=lines))
+            rat = [(e, k, v) for e in entries for k, v in e.ratio_suggestions().items()]
+            if rat:
+                lines = "\n".join(f"  · {self.label_of(e)}  {k[0]}{k[1:]}°: {e.rows_of(k)[0].value} → {v}" for e, k, v in rat)
+                self.warn(t("rt_title"), t("rt_msg", n=len(rat), lines=lines))
+        self.show_table(kind, item["name"], parsed, entries, prefix, carry)
 
     # ------------------------------------------------------------ 2. 파라미터/GV 표
-    def show_table(self, kind, name, parsed, entries, prefix):
+    def show_table(self, kind, name, parsed, entries, prefix, carry=None):
         self.clear()
         head = ttk.Frame(self.container, padding=8)
         head.pack(fill="x")
@@ -423,7 +462,7 @@ class App(tk.Tk):
         for c, txt in enumerate([t(k) for k in keys] + [""]):
             ttk.Label(grid, text=txt, font=self.f_bold).grid(row=0, column=c, padx=6, pady=6)
         self.update_idletasks()
-        wrap = int(max(self.winfo_width(), 900) * 0.2)    # 파라미터 글이 길면 창 폭의 20%에서 줄바꿈해서 표가 창을 넘지 않게 한다
+        wrap = int(max(self.winfo_width(), 900) * 0.26)    # 파라미터 글이 길면 창 폭의 20%에서 줄바꿈해서 표가 창을 넘지 않게 한다
         ch_bg = {"R": "#ffd6d6", "G": "#d6f5d6", "B": "#d6e4ff"}
 
         st = []             # 항목별 상태: {"e", "t": {ch: StringVar}, "g": {...}, "lbl": {...}, "ent": {...}, "mat": StringVar}
@@ -484,6 +523,7 @@ class App(tk.Tk):
             e = d["e"]
             if from_gv and ch in (None, "G"):
                 e.manual_ok = False
+                e.ok_logged = False             # 값을 다시 입력/수정하면 새 기록 대상
             if e.channels:
                 v = num(d["t"][ch])
                 if v:
@@ -533,7 +573,10 @@ class App(tk.Tk):
             st.append(d)
             match = e.ratio_matches()
             ratio_txt = e.ratio_text() + ("" if match is None else (" ✓" if match else " ⚠"))
-            note = f"\n{t('off_flag')}" if e.disabled else ""
+            parts = [t("off_flag")] if e.disabled else []
+            if e.attempt > 1:                       # 2차 이상 시도: 직전에 입력한 GV 도 함께 안내
+                parts.append(t("attempt_tag", n=e.attempt) + (f" · {t('prev_gv_tag', gv=f'{e.prev_gv:g}')}" if e.prev_gv is not None else ""))
+            note = "".join("\n" + x for x in parts)
             for ch in ch_list:                      # BT 처럼 한 줄에 하나: 조명/채널, 파라미터, 비율, 소재, 목표, 현재 GV, 판정
                 r = next_row
                 next_row += 1
@@ -602,9 +645,25 @@ class App(tk.Tk):
                     fix_vars[(i, k)] = v
                     tk.Label(rt_row, text=f"  {k[0]}{k[1:]}° ({e.rows_of(k)[0].value}) →", bg=bg, fg=fg).pack(side="left")
                     tk.Entry(rt_row, textvariable=v, width=6, justify="center", bd=2, relief="solid").pack(side="left", padx=(4, 12))
+        def fit():
+            try:
+                self.autofit(grid.winfo_reqwidth, lambda: outer.winfo_width() - vsb.winfo_reqwidth() - 6)
+            except tk.TclError:
+                pass
+        self.fit_fn = fit
+        self.after(100, fit)
         apply_lock()
-        if order:
-            st[order[0][0]]["ent"][order[0][1]].focus_set()
+        for i, e in enumerate(entries):             # 저장 후 같은 화면: 이미 OK 인 조명은 입력값과 OK 를 그대로 유지
+            cv = (carry or {}).get(e.key)
+            if cv:
+                st[i]["g"]["G" if e.channels else None].set(cv["gv"])
+                e.manual_ok = cv["manual"]
+                e.ok_logged = True
+                paint(i)
+        todo = [(i, ch) for i, ch in order if not st[i]["e"].ok]
+        first = (todo or order or [None])[0]
+        if first:
+            st[first[0]]["ent"][first[1]].focus_set()
 
         foot = ttk.Frame(self.container, padding=8)
         foot.pack(fill="x")
@@ -641,6 +700,7 @@ class App(tk.Tk):
             if unresolved:
                 self.warn(t("save_title"), t("need_fix_values"))
                 return
+            self.log_round(entries, fixes, prefix, parsed)       # 목표에 도달한(OK) 조명도 기록하고 시도 횟수를 초기화
             if not self.ask_yes_no(t("save_title"), t("nothing_to_fix")):
                 return
             self.persist()
@@ -671,9 +731,48 @@ class App(tk.Tk):
         except OSError as ex:
             self.error(t("save_fail"), str(ex))
             return
+        log = self.log_round(entries, fixes, prefix, parsed)
         self.persist()
-        self.info(t("save_title"), t("save_done") + (t("save_done_bak", bak=bak) if bak else ""))
-        self.show_main()
+        self.info(t("save_title"), t("save_done") + (t("save_done_bak", bak=bak) if bak else "") + (t("save_done_log", log=log) if log else ""))
+        # 메인으로 나가지 않고 같은 화면에 머문다: 파일을 다시 읽고, 이미 OK 인 조명은 그대로 두고, 보정한 조명은 다음 차수 측정을 기다린다
+        carry = {e.key: {"gv": "" if e.cur_gv is None else f"{e.cur_gv:g}", "manual": e.manual_ok}
+                 for i, e in enumerate(entries) if i not in fixes and e.ok}
+        try:
+            fresh = core.parse_file(parsed.path)
+        except (OSError, ValueError) as ex:
+            self.error(t("load_fail"), self.err_text(ex))
+            self.show_main()
+            return
+        self.enter_table(fresh, carry, popups=False)
+
+    def log_round(self, entries, fixes, prefix, parsed):
+        """이번 시도를 로그(CSV)에 남기고, 조명별 시도 횟수 상태를 갱신한다. 기록한 로그 경로를 돌려준다."""
+        c = self.ctx
+        meta = {"model": c["model"], "item": c["item"]["name"], "file": os.path.basename(parsed.path)}
+        rows, now = [], datetime.now().isoformat(timespec="seconds")
+        self.cfg.setdefault("tuning", {})
+        for i, e in enumerate(entries):
+            moved = any(r.new_value is not None and r.new_value != r.value for r in e.rows)
+            if e.ok_logged and i not in fixes:
+                continue                            # 앞 시도에서 이미 OK 로 기록됨 (그대로 유지 중)
+            if i in fixes:
+                action = "fix"
+            elif e.cur_gv is not None and core.is_ok(e.cur_gv, e.target):
+                action = "ok"
+            elif e.manual_ok:
+                action = "ok_manual"
+            elif e.cur_gv is not None:
+                action = "correct" if moved else "no_change"
+            else:
+                continue
+            rows.append(core.build_log_row(e, action, meta, self.exponents, self.align.get()))
+            key = prefix + e.key
+            if action in ("ok", "ok_manual"):
+                self.cfg["tuning"].pop(key, None)
+            elif action in ("correct", "no_change"):
+                self.cfg["tuning"][key] = {"n": e.attempt, "prev_gv": e.cur_gv, "t": now}
+        path = core.append_log(rows)
+        return str(path) if path else ""
 
 
 if __name__ == "__main__":

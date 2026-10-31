@@ -299,3 +299,33 @@ def test_abf_ratio_checked_even_when_file_has_channel_not_in_spec():
     assert core.apply_corrections([e2]) == 1
     nv = {(r.angle): r.new_value for r in e2.rows if r.new_value}
     assert abs(nv[30] / nv[60] - 6 / 5) < 0.02 and nv[0] / nv[60] - 0.5 < 0.02
+
+
+def test_tuning_log_row_and_csv(tmp_path=None):
+    import csv
+    import pathlib
+    from datetime import datetime, timedelta
+    d = pathlib.Path(tempfile.mkdtemp())
+    core.log_path = lambda: d / "tuning_log.csv"
+    try:
+        e = core.build_entries("ABF", core.parse_file(ABF), P["ABF_TOP"])[0]
+        e.set_channel_gv("G", 150)
+        e.attempt, e.prev_gv = 2, 120
+        core.apply_corrections([e])
+        row = core.build_log_row(e, "correct", {"model": "M", "item": "ABF Top (Unit)", "file": "x.xml"})
+        assert (row["attempt"], row["action"], row["target_gv"], row["cur_gv"], row["prev_gv"]) == (2, "correct", 200, 150, 120)
+        assert row["anchor"] == "W0" and row["anchor_before"] == 35 and row["anchor_after"] > 35 and row["scale"] > 1
+        assert row["params_before"] == "W0°=35 · W30°=105 · W60°=105" and "W30°=105" not in row["params_after"]
+        assert core.append_log([row]) == d / "tuning_log.csv"
+        core.append_log([dict(row, attempt=3, action="ok")])
+        rows = list(csv.DictReader(open(d / "tuning_log.csv", encoding="utf-8-sig")))
+        assert [r["attempt"] for r in rows] == ["2", "3"] and set(rows[0]) >= set(core.LOG_FIELDS)
+    finally:
+        del core.log_path                 # 원래 함수를 되돌림 (모듈 속성 제거 -> 다시 import 필요 없도록 reload)
+        import importlib
+        importlib.reload(core)
+    # 진행 중인 시도 기록은 12시간 뒤 만료
+    now = datetime.now()
+    cfg = {"tuning": {"k": {"n": 1, "prev_gv": 150, "t": (now - timedelta(hours=1)).isoformat()},
+                      "old": {"n": 3, "prev_gv": 90, "t": (now - timedelta(hours=13)).isoformat()}}}
+    assert core.tuning_state(cfg, "k")["n"] == 1 and core.tuning_state(cfg, "old") is None and "old" not in cfg["tuning"]

@@ -2,7 +2,7 @@
 
 t("키", 이름=값, ...) 로 현재 언어의 문구를 가져온다. 새 문구는 TEXT 에 세 언어를 함께 추가한다.
 """
-VERSION = "2026.10.30-9"
+VERSION = "2026.10.31-10"
 LANGS = {"ko": "한국어", "zh": "繁體中文", "vi": "Tiếng Việt"}
 _lang = "ko"
 
@@ -144,6 +144,9 @@ TEXT = {
     "confirm_title": ("저장 확인", "確認儲存", "Xác nhận lưu"),
     "save_fail": ("저장 실패", "儲存失敗", "Lưu thất bại"),
     "save_done": ("저장했습니다.", "已儲存。", "Đã lưu."),
+    "save_done_log": ("\n시도 로그: {log}", "\n嘗試紀錄：{log}", "\nNhật ký thử: {log}"),
+    "attempt_tag": ("{n}차 시도", "第 {n} 次嘗試", "Lần thử {n}"),
+    "prev_gv_tag": ("이전 GV {gv}", "上次 GV {gv}", "GV lần trước {gv}"),
     "save_done_bak": ("\n백업: {bak}", "\n備份檔：{bak}", "\nBản sao lưu: {bak}"),
 }
 
