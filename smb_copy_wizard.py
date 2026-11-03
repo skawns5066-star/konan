@@ -4,7 +4,8 @@
 표준 라이브러리(tkinter, shutil, threading)만 사용한다.
 
 - 모든 로그는 화면과 함께 파일(프로그램 폴더의 logs\\copy_log_YYYYMMDD.txt)에 저장된다.
-- INSPECT_SPEC 대상에 <모델명>-01, -02 ... 같은 개정 폴더가 있으면 복사 전에 경고한다.
+- INSPECT_SPEC은 원본 PC의 가장 높은 번호(<모델명>-NN) 폴더를 대상 PC의 가장 높은 번호 폴더에
+  덮어쓴다. 대상에 번호 폴더가 없으면 <모델명>-00 을 새로 만든다. 복사 전 폴더 선택을 확인받는다.
 """
 import datetime
 import os
@@ -49,19 +50,24 @@ def build_path(ip, item, model):
     return "\\".join(parts)
 
 
-def find_extra_revisions(target_dir, model):
-    """대상 폴더 옆에 있는 <모델명>-01, -02 ... 개정 폴더 이름 목록을 반환.
+def inspect_dir(ip):
+    """INSPECT_SPEC 상위 폴더 UNC 경로."""
+    share, sub, _ = ITEMS["INSPECT_SPEC"]
+    return rf"\\{ip}\{share}\{sub}"
 
-    <모델명>-00 은 복사 대상 자체이므로 제외한다. 목록을 읽지 못하면 OSError 발생.
+
+def latest_revision(parent_dir, model):
+    """parent_dir 안에서 <모델명>-NN 폴더 중 번호가 가장 큰 폴더 이름을 반환 (없으면 None).
+
+    목록을 읽지 못하면 OSError 발생.
     """
-    parent = os.path.dirname(target_dir)
-    pattern = re.compile(rf"^{re.escape(model)}-(\d{{2,}})$", re.IGNORECASE)
+    pattern = re.compile(rf"^{re.escape(model)}-(\d+)$", re.IGNORECASE)
     found = []
-    for name in os.listdir(parent):
+    for name in os.listdir(parent_dir):
         m = pattern.match(name)
-        if m and int(m.group(1)) != 0 and os.path.isdir(os.path.join(parent, name)):
-            found.append(name)
-    return sorted(found)
+        if m and os.path.isdir(os.path.join(parent_dir, name)):
+            found.append((int(m.group(1)), name))
+    return max(found)[1] if found else None
 
 
 def copy_item(src, dst):
@@ -247,56 +253,84 @@ class Wizard(tk.Tk):
         self.set_all(False)
         self.show_step1()
 
-    def check_revisions(self):
-        """INSPECT_SPEC 대상 PC의 -01, -02 ... 개정 폴더를 점검해 경고 목록 반환."""
-        conflicts = []
-        if "INSPECT_SPEC" not in self.items:
-            return conflicts
-        self.log("info", "[점검] 대상 PC의 INSPECT_SPEC 개정 폴더(-01, -02 ...) 확인 중...")
-        for pc in self.targets:
-            dst = build_path(pc[1], "INSPECT_SPEC", self.model)
+    def make_plan(self):
+        """복사 계획 작성: (대상 PC, 항목, 원본, 대상, 오류) 목록.
+
+        INSPECT_SPEC은 원본 PC의 가장 높은 번호 폴더를 대상 PC의 가장 높은 번호 폴더로 복사한다.
+        대상에 번호 폴더가 없으면 <모델명>-00 을 새로 만든다.
+        """
+        plan = []
+        src_name = src_err = None
+        if "INSPECT_SPEC" in self.items:
             try:
-                extra = find_extra_revisions(dst, self.model)
+                src_name = latest_revision(inspect_dir(self.src_pc[1]), self.model)
+                if src_name is None:
+                    src_err = f"원본에 '{self.model}-NN' 폴더가 없습니다"
             except OSError as e:
-                self.log("warn", f"[경고] {pc_label(pc)} 폴더 목록을 읽지 못했습니다 - 원인: {e}")
-                continue
-            if extra:
-                conflicts.append((pc, extra))
-                self.log("warn", f"[경고] {pc_label(pc)}에 개정 폴더가 있습니다: {', '.join(extra)}")
-        return conflicts
+                src_err = f"원본 폴더 목록을 읽지 못했습니다: {e}"
+        for pc in self.targets:
+            for item in self.items:
+                if item != "INSPECT_SPEC":
+                    plan.append((pc, item, build_path(self.src_pc[1], item, self.model),
+                                 build_path(pc[1], item, self.model), None))
+                    continue
+                if src_err:
+                    plan.append((pc, item, None, None, src_err))
+                    continue
+                try:
+                    dst_name = latest_revision(inspect_dir(pc[1]), self.model)
+                except OSError as e:
+                    plan.append((pc, item, None, None, f"대상 폴더 목록을 읽지 못했습니다: {e}"))
+                    continue
+                dst_name = dst_name or f"{self.model}-00"
+                plan.append((pc, item, os.path.join(inspect_dir(self.src_pc[1]), src_name),
+                             os.path.join(inspect_dir(pc[1]), dst_name), None))
+        return plan
 
     def run_copy(self):
         self.log("info", "=" * 50)
         self.log("info", f"복사 시작 | 모델명: {self.model} | 원본: {pc_label(self.src_pc)}")
         self.log("info", f"항목: {', '.join(self.items)} | 대상: {', '.join(pc_label(t) for t in self.targets)}")
 
-        conflicts = self.check_revisions()
-        if conflicts:
-            lines = "\n".join(f"- {pc_label(pc)}: {', '.join(names)}" for pc, names in conflicts)
+        plan = self.make_plan()
+        if "INSPECT_SPEC" in self.items:
+            lines = []
+            for pc, item, src, dst, err in plan:
+                if item != "INSPECT_SPEC":
+                    continue
+                if err:
+                    text = f"{pc_label(pc)}: 복사 불가 - {err}"
+                    self.log("warn", f"[계획] INSPECT_SPEC {text}")
+                else:
+                    sname, dname = src.split("\\")[-1], dst.split("\\")[-1]
+                    new = "" if os.path.isdir(dst) else " (새로 생성)"
+                    text = f"{pc_label(pc)}: 원본 {sname} -> 대상 {dname}{new}"
+                    self.log("info", f"[계획] INSPECT_SPEC {text}")
+                lines.append("- " + text)
             self.answer.clear()
             self.log_queue.put(("ask", (
-                "개정 폴더 발견",
-                f"아래 PC에는 '{self.model}-00' 외에 다른 번호의 폴더가 있습니다.\n\n{lines}\n\n"
-                f"이 프로그램은 '{self.model}-00'에만 복사하므로, 장비가 -01 이상 폴더를 사용 중이면 "
-                "복사해도 반영되지 않을 수 있습니다.\n\n그래도 복사를 진행할까요?")))
+                "INSPECT_SPEC 복사 폴더 확인",
+                "INSPECT_SPEC은 원본의 가장 높은 번호 폴더를 대상의 가장 높은 번호 폴더에 덮어씁니다.\n\n"
+                + "\n".join(lines) + "\n\n이대로 복사를 진행할까요?")))
             self.answer.wait()
             if not self.answer_yes:
-                self.log("warn", "[취소] 개정 폴더 경고에서 사용자가 복사를 취소했습니다.")
+                self.log("warn", "[취소] 복사 폴더 확인에서 사용자가 복사를 취소했습니다.")
                 self.log_queue.put(("done", "복사가 취소되었습니다. 성공 0건, 실패 0건"))
                 return
 
         ok = fail = 0
-        for dst_pc in self.targets:
-            for item in self.items:
-                src = build_path(self.src_pc[1], item, self.model)
-                dst = build_path(dst_pc[1], item, self.model)
-                try:
-                    copy_item(src, dst)
-                    ok += 1
-                    self.log("ok", f"[성공] {item}: {src} -> {dst}")
-                except Exception as e:  # noqa: BLE001 - 원인을 그대로 로그에 남김
-                    fail += 1
-                    self.log("fail", f"[실패] {item}: {src} -> {dst} - 원인: {describe_error(e)}")
+        for pc, item, src, dst, err in plan:
+            if err:
+                fail += 1
+                self.log("fail", f"[실패] {item}: {pc_label(pc)} - 원인: {err}")
+                continue
+            try:
+                copy_item(src, dst)
+                ok += 1
+                self.log("ok", f"[성공] {item}: {src} -> {dst}")
+            except Exception as e:  # noqa: BLE001 - 원인을 그대로 로그에 남김
+                fail += 1
+                self.log("fail", f"[실패] {item}: {src} -> {dst} - 원인: {describe_error(e)}")
         self.log("info", "=" * 50)
         self.log_queue.put(("done", f"완료: 성공 {ok}건, 실패 {fail}건"))
         self.log("info", f"완료: 성공 {ok}건, 실패 {fail}건")
