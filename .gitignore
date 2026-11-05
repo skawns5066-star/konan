@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 logs/
+
+# 사용자 데이터 / 빌드 산출물
+data/
+backups/
+build/
+dist/
+*.spec
