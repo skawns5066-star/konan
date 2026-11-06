@@ -1,6 +1,7 @@
 """등록/수정 창 (모든 카테고리 공통).
 왼쪽: 문제가 생긴 화면 사진 1장(크롭) / 오른쪽: 제목 + 해결 방법(텍스트 + 사진 여러 장)."""
 import json
+import socket
 from typing import Optional
 
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout
@@ -15,11 +16,18 @@ from .crop_dialog import CropDialog
 
 
 class EntryDialog(QDialog):
-    def __init__(self, parent, db, category: str, entry: Optional[dict] = None):
+    MODE_NORMAL, MODE_ASK, MODE_ANSWER = "normal", "ask", "answer"
+
+    def __init__(self, parent, db, category: str, entry: Optional[dict] = None, mode: Optional[str] = None):
+        """mode: normal(해결 방법까지 한 번에 등록) / ask(모르는 문제를 올려 답변 대기) / answer(대기 중인 문제에 해결 방법 등록)"""
         super().__init__(parent)
         self.db = db
         self.category = category
         self.entry = entry
+        if mode is None:
+            mode = self.MODE_ASK if (entry and entry.get("status") == config.STATUS_OPEN) else self.MODE_NORMAL
+        self.mode = mode
+        self.pc_name = socket.gethostname()
         self.saved_id: Optional[int] = None
 
         # 사진 상태
@@ -30,7 +38,9 @@ class EntryDialog(QDialog):
         self._meta: Optional[dict] = None
         self._crop_dirty = False
 
-        self.setWindowTitle(("编辑 · " if entry else "添加 · ") + config.CATEGORY_TITLES.get(category, ""))
+        prefix = {self.MODE_ASK: "提问（等待解答）· ", self.MODE_ANSWER: "填写解决方法 · "}.get(
+            mode, "编辑 · " if entry else "添加 · ")
+        self.setWindowTitle(prefix + config.CATEGORY_TITLES.get(category, ""))
         self.resize(1200, 760)
         self._build()
         if entry:
@@ -63,6 +73,12 @@ class EntryDialog(QDialog):
         self.title_edit.setPlaceholderText("请输入标题（繁體中文）")
         form.addWidget(self.title_edit)
 
+        if self.mode == self.MODE_ASK:
+            hint = QLabel("不知道解决方法？先上传出问题的画面并填写标题，\n其他PC会收到“等待解答”提醒，知道的人会来补充解决方法。")
+            hint.setObjectName("AlertBanner")
+            hint.setWordWrap(True)
+            form.addSpacing(8)
+            form.addWidget(hint)
         lbl2 = QLabel("解决方法")
         lbl2.setObjectName("Section")
         form.addSpacing(6)
@@ -74,12 +90,16 @@ class EntryDialog(QDialog):
         form.addWidget(self.solution_edit, 1)
         self.sol_editor = SolutionPhotoEditor()
         form.addWidget(self.sol_editor)
+        if self.mode == self.MODE_ASK:          # 질문 단계에서는 해결 방법 입력칸을 숨김
+            for w in (lbl2, self.solution_edit, self.sol_editor):
+                w.hide()
+            form.addStretch(1)
 
         btns = QHBoxLayout()
         btns.addStretch(1)
         cancel = QPushButton("取消")
         cancel.clicked.connect(self.reject)
-        save = QPushButton("保存")
+        save = QPushButton({self.MODE_ASK: "提交（等待解答）"}.get(self.mode, "保存"))
         save.setObjectName("Primary")
         save.clicked.connect(self._save)
         btns.addWidget(cancel)
@@ -141,6 +161,9 @@ class EntryDialog(QDialog):
             warn(self, "请输入标题。")
             self.title_edit.setFocus()
             return
+        if self.mode == self.MODE_ANSWER and not solution and not self.sol_editor.items():
+            warn(self, "请填写解决方法（文字或图片）。")
+            return
 
         old = self.entry or {}
         orig_rel = old.get("original")
@@ -170,9 +193,15 @@ class EntryDialog(QDialog):
 
         meta = storage.dumps_meta(self._meta)
         if self.entry:
+            extra = {}
+            if self.mode == self.MODE_ANSWER:       # 답변 등록 → 알람 해제
+                extra = {"status": config.STATUS_SOLVED, "answered_by": self.pc_name}
             self.db.update_entry(self.entry["id"], title=title, solution=solution,
-                                 original=orig_rel, image=image_rel, crop_meta=meta, sol_images=sol_json)
+                                 original=orig_rel, image=image_rel, crop_meta=meta, sol_images=sol_json, **extra)
             self.saved_id = self.entry["id"]
+        elif self.mode == self.MODE_ASK:
+            self.saved_id = self.db.add_entry(self.category, title, "", orig_rel, image_rel, meta, None,
+                                              status=config.STATUS_OPEN, asked_by=self.pc_name)
         else:
             self.saved_id = self.db.add_entry(self.category, title, solution, orig_rel, image_rel, meta, sol_json)
         storage.remove_files(*[r for r in to_remove if r and r not in (orig_rel, image_rel, *new_sol)])

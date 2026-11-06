@@ -2,7 +2,7 @@
 from typing import List, Optional
 
 from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QVBoxLayout, QWidget)
 
 from .. import config, storage
@@ -30,13 +30,22 @@ class PhotoCard(QFrame):
         self.title.setWordWrap(True)
         self.title.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.title.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.badge = QLabel("⏳ 等待解答中", self)
+        self.badge.setObjectName("Badge")
+        self.badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.badge.hide()
 
     def set_entry(self, e: dict):
         self.entry_id = e["id"]
         src = e["image"] or e["original"]
         self.image.set_image(storage.load_qimage(src) if src else None)
         self.title.setText(e["title"])
-        self.setToolTip(e["title"])
+        pending = e.get("status") == config.STATUS_OPEN
+        self.setToolTip(e["title"] + ("\n（等待解答中）" if pending else ""))
+        self.setProperty("pending", pending)
+        self.badge.setVisible(pending)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def layout_children(self, ratio: float, title_h: int):
         w = self.width()
@@ -44,6 +53,9 @@ class PhotoCard(QFrame):
         ih = int(round(iw / ratio))
         self.image.setGeometry(PAD, PAD, iw, ih)
         self.title.setGeometry(PAD, PAD + ih + 4, iw, title_h)
+        self.badge.adjustSize()
+        self.badge.move(PAD + 10, PAD + 10)
+        self.badge.raise_()
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.LeftButton and self.rect().contains(ev.position().toPoint()):
@@ -124,6 +136,7 @@ class CardGrid(QWidget):
 
 class CardPage(QWidget):
     goHome = Signal()
+    changed = Signal()      # 이 PC에서 항목이 추가/수정/삭제/답변됨 (알람 갱신용)
 
     def __init__(self, db, category: str, title: str, parent=None):
         super().__init__(parent)
@@ -140,6 +153,7 @@ class CardPage(QWidget):
         self.header = PageHeader(title)
         self.header.back.clicked.connect(self.goHome)
         self.header.add.clicked.connect(self._add)
+        self.header.ask.clicked.connect(self._ask)
         root.addWidget(self.header)
 
         self.search = QLineEdit()
@@ -147,7 +161,22 @@ class CardPage(QWidget):
         self.search.setPlaceholderText("🔍  输入标题进行搜索（不区分大小写，支持部分匹配）")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._on_search)
-        root.addWidget(self.search)
+        srow = QHBoxLayout()
+        srow.setSpacing(10)
+        srow.addWidget(self.search, 1)
+        self._filter = None             # None=全部 / open / solved
+        self._chips = {}
+        grp = QButtonGroup(self)
+        grp.setExclusive(True)
+        for key, text in ((None, "全部"), (config.STATUS_OPEN, "待解答"), (config.STATUS_SOLVED, "已解决")):
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setChecked(key is None)
+            grp.addButton(b)
+            b.clicked.connect(lambda _=False, k=key: self._set_filter(k))
+            srow.addWidget(b)
+            self._chips[key] = b
+        root.addLayout(srow)
 
         self.grid = CardGrid(db.card_ratio)
         self.grid.cardClicked.connect(self._open)
@@ -177,9 +206,19 @@ class CardPage(QWidget):
     def pages(self) -> int:
         return max(1, -(-len(self._entries) // config.PAGE_SIZE))
 
+    def _set_filter(self, key):
+        self._filter = key
+        self._page = 0
+        self.refresh()
+
     def refresh(self):
         self.grid.set_ratio(self.db.card_ratio)
-        self._entries = self.db.list_entries(self.category, self.search.text())
+        self._entries = self.db.list_entries(self.category, self.search.text(), self._filter)
+        n_open = self.db.count_open(self.category)
+        self._chips[config.STATUS_OPEN].setText(f"待解答 ({n_open})" if n_open else "待解答")
+        self._chips[config.STATUS_OPEN].setObjectName("Alert" if n_open else "")
+        self._chips[config.STATUS_OPEN].style().unpolish(self._chips[config.STATUS_OPEN])
+        self._chips[config.STATUS_OPEN].style().polish(self._chips[config.STATUS_OPEN])
         self._page = min(self._page, self.pages() - 1)
         self._render()
 
@@ -196,8 +235,8 @@ class CardPage(QWidget):
         chunk = self._entries[start:start + config.PAGE_SIZE]
         if self._entries:
             empty = ""
-        elif self.search.text().strip():
-            empty = "没有找到匹配的标题"
+        elif self.search.text().strip() or self._filter:
+            empty = "没有找到匹配的内容"
         else:
             empty = "还没有数据。\n请点击右上角“添加”登记第一条故障。"
         self.grid.set_entries(chunk, empty)
@@ -217,12 +256,24 @@ class CardPage(QWidget):
         dlg.exec()
         if dlg.was_changed:
             self.refresh()
+            self.changed.emit()
+
+    def _ask(self):
+        dlg = EntryDialog(self, self.db, self.category, mode=EntryDialog.MODE_ASK)
+        if dlg.exec() == QDialog.Accepted:
+            self._after_add()
 
     def _add(self):
         dlg = EntryDialog(self, self.db, self.category)
         if dlg.exec() == QDialog.Accepted:
-            self.search.blockSignals(True)
-            self.search.clear()
-            self.search.blockSignals(False)
-            self._page = 0
-            self.refresh()
+            self._after_add()
+
+    def _after_add(self):
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self._filter = None
+        self._chips[None].setChecked(True)
+        self._page = 0
+        self.refresh()
+        self.changed.emit()

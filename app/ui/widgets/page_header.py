@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 
 class PageHeader(QWidget):
@@ -14,7 +14,12 @@ class PageHeader(QWidget):
         self.title = QLabel(title)
         self.title.setObjectName("Title")
         self.sync_lbl = QLabel("")
+        self.sync_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # 좁은 창에서는 제목보다 먼저 줄어듦
+        self.sync_lbl.setMinimumWidth(0)
         self.sync = QPushButton("⟳  同步")
+        self.ask = QPushButton("❓  提问（求助）")
+        self.ask.setObjectName("Alert")
+        self.ask.setToolTip("不知道解决方法？上传出问题的画面，向其他人求助")
         self.add = QPushButton("＋  添加")
         self.add.setObjectName("Primary")
         lay.addWidget(self.back)
@@ -23,4 +28,5 @@ class PageHeader(QWidget):
         lay.addStretch(1)
         lay.addWidget(self.sync_lbl)
         lay.addWidget(self.sync)
+        lay.addWidget(self.ask)
         lay.addWidget(self.add)

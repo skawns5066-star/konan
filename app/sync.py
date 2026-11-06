@@ -103,7 +103,7 @@ def run_sync(db, shared: str, seen: dict) -> dict:
                 if src.is_file() and not dst.exists():
                     _copy_atomic(src, dst)
         rec = {k: e[k] for k in ("category", "title", "solution", "original", "image", "crop_meta", "sol_images",
-                                 "created_at", "updated_at", "rev", "deleted", "device")}
+                                 "status", "asked_by", "answered_by", "created_at", "updated_at", "rev", "deleted", "device")}
         rec["uid"] = e["uid"]
         _atomic_write(path, json.dumps(rec, ensure_ascii=False).encode("utf-8"))
         db.mark_clean(e["uid"], e["rev"])

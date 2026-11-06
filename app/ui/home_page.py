@@ -22,8 +22,21 @@ class HomeCard(QPushButton):
         d.setAlignment(Qt.AlignCenter)
         for w in (t, d):
             w.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.badge = QLabel("")
+        self.badge.setObjectName("HomeBadge")
+        self.badge.setAlignment(Qt.AlignCenter)
+        self.badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.badge.hide()
         lay.addWidget(t)
         lay.addWidget(d)
+        lay.addWidget(self.badge, 0, Qt.AlignHCenter)
+
+    def set_pending(self, n: int):
+        self.badge.setText(f"⏳ {n} 个问题等待解答")
+        self.badge.setVisible(n > 0)
+        self.setProperty("pending", n > 0)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class HomePage(QWidget):
@@ -45,7 +58,12 @@ class HomePage(QWidget):
         sub.setAlignment(Qt.AlignCenter)
         root.addWidget(title)
         root.addWidget(sub)
-        root.addSpacing(14)
+        self.alarm = QLabel("")
+        self.alarm.setObjectName("AlertBanner")
+        self.alarm.setAlignment(Qt.AlignCenter)
+        self.alarm.hide()
+        root.addWidget(self.alarm)
+        root.addSpacing(8)
 
         grid = QGridLayout()
         grid.setSpacing(24)
@@ -71,3 +89,12 @@ class HomePage(QWidget):
         b.clicked.connect(self.openSettings)
         foot.addWidget(b)
         root.addLayout(foot)
+
+    def set_alarms(self, counts: dict):
+        """카테고리별 답변 대기 개수 → 버튼 배지 + 상단 경고 배너."""
+        for key, card in self.cards.items():
+            card.set_pending(counts.get(key, 0))
+        total = sum(counts.values())
+        self.alarm.setVisible(total > 0)
+        if total:
+            self.alarm.setText(f"⚠ 共有 {total} 个问题正在等待解答，知道解决方法的人请进入对应分类查看")

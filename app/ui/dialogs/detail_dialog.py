@@ -1,4 +1,6 @@
 """검사 PC 카드 클릭 시 열리는 상세 창: 원본 사진(확대/이동) + 해결 방법."""
+import time
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSplitter,
                                QTextBrowser, QVBoxLayout, QWidget)
@@ -51,10 +53,16 @@ class DetailDialog(QDialog):
         rl = QVBoxLayout(right)
         rl.setContentsMargins(18, 18, 18, 16)
         rl.setSpacing(10)
+        self.banner = QLabel()
+        self.banner.setObjectName("AlertBanner")
+        self.banner.setWordWrap(True)
+        rl.addWidget(self.banner)
         self.title_lbl = QLabel()
         self.title_lbl.setObjectName("TcTitle")
         self.title_lbl.setWordWrap(True)
         rl.addWidget(self.title_lbl)
+        self.meta_lbl = QLabel()
+        rl.addWidget(self.meta_lbl)
         sec = QLabel("解决方法")
         sec.setObjectName("Section")
         rl.addWidget(sec)
@@ -68,6 +76,9 @@ class DetailDialog(QDialog):
         self.gallery = SolutionGallery()
         rl.addWidget(self.gallery, 3)
         row = QHBoxLayout()
+        self.b_answer = QPushButton("填写解决方法")
+        self.b_answer.setObjectName("Primary")
+        self.b_answer.clicked.connect(self._answer)
         b_edit = QPushButton("编辑")
         b_edit.clicked.connect(self._edit)
         b_del = QPushButton("删除")
@@ -76,6 +87,7 @@ class DetailDialog(QDialog):
         b_close = QPushButton("关闭")
         b_close.setObjectName("Primary")
         b_close.clicked.connect(self.accept)
+        row.addWidget(self.b_answer)
         row.addWidget(b_edit)
         row.addWidget(b_del)
         row.addStretch(1)
@@ -89,7 +101,18 @@ class DetailDialog(QDialog):
     def _fill(self):
         e = self.entry
         self.title_lbl.setText(e["title"])
-        self.solution.setPlainText(e["solution"] or ("" if storage.sol_list(e) else "（尚未填写解决方法）"))
+        is_open = e.get("status") == config.STATUS_OPEN
+        stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(e["created_at"]))
+        if is_open:
+            self.banner.setText("⏳ 等待解答中 —— 知道解决方法的人，请点击下方“填写解决方法”")
+            self.meta_lbl.setText(f"提问PC：{e.get('asked_by') or '-'}　·　提问时间：{stamp}")
+        else:
+            self.meta_lbl.setText(f"解答PC：{e['answered_by']}" if e.get("answered_by") else "")
+        self.banner.setVisible(is_open)
+        self.meta_lbl.setVisible(bool(self.meta_lbl.text()))
+        self.b_answer.setVisible(is_open)
+        self.solution.setPlainText(e["solution"] or ("" if storage.sol_list(e) else (
+            "（等待解答中，尚无解决方法）" if is_open else "（尚未填写解决方法）")))
         src = e["original"] or e["image"]
         self.zoom.set_image(storage.load_qimage(src) if src else None)
         sol = storage.sol_list(e)
@@ -101,6 +124,16 @@ class DetailDialog(QDialog):
     def showEvent(self, ev):
         super().showEvent(ev)
         self.zoom.fit()
+
+    def _answer(self):
+        if not ask_password(self, self.db, "填写解决方法需要输入密码"):
+            return
+        dlg = EntryDialog(self, self.db, self.entry["category"], self.entry, mode=EntryDialog.MODE_ANSWER)
+        if dlg.exec() == QDialog.Accepted:
+            self.entry = self.db.get_entry(self.entry["id"])
+            self.was_changed = True
+            self._fill()
+            self.changed.emit()
 
     def _edit(self):
         if not ask_password(self, self.db, "编辑需要输入密码"):

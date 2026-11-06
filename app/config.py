@@ -39,6 +39,8 @@ INSPECT_MAX_SIZE = (1500, 940)    # 검사 PC 화면(작은 모니터면 자동�
 # 카드 비율 (설정에서 변경)
 RATIOS = {"16:9": 16 / 9, "4:3": 4 / 3, "3:2": 3 / 2, "1:1": 1.0}
 DEFAULT_RATIO = "16:9"
+STATUS_OPEN = "open"        # 해결 방법을 아직 모름 → 답변 대기 (알람 표시)
+STATUS_SOLVED = "solved"    # 해결 방법 등록됨
 PAGE_SIZE = 6   # 3열 x 2행
 
 DEFAULT_FONT_PT = 12

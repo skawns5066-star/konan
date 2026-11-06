@@ -68,6 +68,9 @@ QPushButton#Primary {{ background: {ACCENT}; border: 1px solid {ACCENT_LINE}; fo
 QPushButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
 QPushButton#Danger {{ background: #FFDADA; border: 1px solid #EFA3A3; }}
 QPushButton#Danger:hover {{ background: #FFC6C6; }}
+QPushButton#Alert {{ background: #FFE0B2; border: 1px solid #F5A623; font-weight: 600; }}
+QPushButton#Alert:hover {{ background: #FFD08A; }}
+QPushButton#Alert:checked {{ background: #FFB74D; border: 1px solid #E08900; }}
 QPushButton#Flat {{ background: transparent; border: 1px solid transparent; }}
 QPushButton#Flat:hover {{ background: #E4EBF6; }}
 QPushButton#HomeCard {{
@@ -96,6 +99,21 @@ QListWidget::item:selected {{ background: {ACCENT}; color: #000000; }}
 QFrame#Panel {{ background: #FFFFFF; border: 1px solid {BORDER}; border-radius: {px(14)}px; }}
 QFrame#PhotoCard {{ background: #FFFFFF; border: 1px solid {BORDER}; border-radius: {px(14)}px; }}
 QFrame#PhotoCard:hover {{ border: 2px solid #7FB0F5; }}
+QFrame#PhotoCard[pending="true"] {{ background: #FFF6E0; border: 3px solid #F5A623; }}
+QFrame#PhotoCard[pending="true"]:hover {{ border: 3px solid #E08900; }}
+QPushButton#HomeCard[pending="true"] {{ background: #FFF8E6; border: 3px solid #F5A623; }}
+QLabel#Badge, QLabel#HomeBadge {{
+    background: #FFB74D; border: 1px solid #E08900; border-radius: {px(11)}px;
+    padding: {px(2)}px {px(12)}px; font-weight: 700;
+}}
+QLabel#AlertBanner {{
+    background: #FFE9B8; border: 1px solid #F5A623; border-radius: {px(10)}px;
+    padding: {px(8)}px {px(14)}px; font-weight: 600;
+}}
+QLabel#Toast {{
+    background: #FFE9B8; border: 2px solid #F5A623; border-radius: {px(14)}px;
+    padding: {px(12)}px {px(20)}px; font-size: {sz(1.1)}; font-weight: 700;
+}}
 
 QScrollBar:vertical {{ background: transparent; width: {px(12)}px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: #C5CEDC; border-radius: {px(5)}px; min-height: 30px; }}

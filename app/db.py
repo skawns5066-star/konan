@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS entries (
     image       TEXT,              -- 카드용 사진(크롭본)
     crop_meta   TEXT,              -- 크롭 정보(JSON)
     sol_images  TEXT,              -- 해결 방법 사진 목록(JSON 배열, 상대경로)
+    status      TEXT NOT NULL DEFAULT 'solved',   -- open(답변 대기) / solved
+    asked_by    TEXT,              -- 질문(요청)을 올린 PC
+    answered_by TEXT,              -- 해결 방법을 등록한 PC
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL,
     uid         TEXT,
@@ -38,7 +41,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-REMOTE_FIELDS = ("category", "title", "solution", "original", "image", "crop_meta", "sol_images",
+REMOTE_FIELDS = ("category", "title", "solution", "original", "image", "crop_meta", "sol_images", "status", "asked_by", "answered_by",
                  "created_at", "updated_at", "rev", "deleted", "device")
 
 
@@ -81,7 +84,8 @@ class Database:
             for name, ddl in (("uid", "TEXT"), ("rev", "INTEGER NOT NULL DEFAULT 1"),
                               ("deleted", "INTEGER NOT NULL DEFAULT 0"),
                               ("dirty", "INTEGER NOT NULL DEFAULT 1"), ("device", "TEXT"),
-                              ("sol_images", "TEXT")):
+                              ("sol_images", "TEXT"), ("status", "TEXT NOT NULL DEFAULT 'solved'"),
+                              ("asked_by", "TEXT"), ("answered_by", "TEXT")):
                 if name not in cols:
                     c.execute(f"ALTER TABLE entries ADD COLUMN {name} {ddl}")
             for row in c.execute("SELECT id FROM entries WHERE uid IS NULL").fetchall():
@@ -171,10 +175,16 @@ class Database:
         self.set_setting("shared_dirty", "0")
 
     # ---- 항목 ----
-    def list_entries(self, category: str, query: str = "") -> list:
+    def list_entries(self, category: str, query: str = "", status: Optional[str] = None) -> list:
+        """답변 대기(open) 항목이 항상 먼저, 그 안에서는 최신순."""
+        sql = "SELECT * FROM entries WHERE category=? AND deleted=0"
+        args = [category]
+        if status:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY (status='open') DESC, id DESC"
         with closing(self._conn()) as c:
-            rows = c.execute("SELECT * FROM entries WHERE category=? AND deleted=0 ORDER BY id DESC",
-                             (category,)).fetchall()
+            rows = c.execute(sql, args).fetchall()
         items = [dict(r) for r in rows]
         q = query.strip().casefold()
         if q:  # 대소문자 무시 + 부분 일치 (유니코드 포함)
@@ -186,20 +196,22 @@ class Database:
             row = c.execute("SELECT * FROM entries WHERE id=? AND deleted=0", (entry_id,)).fetchone()
         return dict(row) if row else None
 
-    def add_entry(self, category, title, solution, original, image, crop_meta=None, sol_images=None) -> int:
+    def add_entry(self, category, title, solution, original, image, crop_meta=None, sol_images=None,
+                  status=config.STATUS_SOLVED, asked_by=None) -> int:
         now = time.time()
         with closing(self._conn()) as c, c:
             cur = c.execute(
                 "INSERT INTO entries(category,title,solution,original,image,crop_meta,sol_images,created_at,updated_at,"
-                "uid,rev,deleted,dirty,device) VALUES(?,?,?,?,?,?,?,?,?,?,1,0,1,?)",
+                "uid,rev,deleted,dirty,device,status,asked_by) VALUES(?,?,?,?,?,?,?,?,?,?,1,0,1,?,?,?)",
                 (category, title, solution, original, image, crop_meta, sol_images, now, now,
-                 uuid.uuid4().hex, self.device_id))
+                 uuid.uuid4().hex, self.device_id, status, asked_by))
             new_id = cur.lastrowid
         self._notify()
         return new_id
 
     def update_entry(self, entry_id: int, **fields):
-        allowed = {"title", "solution", "original", "image", "crop_meta", "sol_images"}
+        allowed = {"title", "solution", "original", "image", "crop_meta", "sol_images", "status",
+                   "asked_by", "answered_by"}
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
             return
@@ -215,6 +227,19 @@ class Database:
             c.execute("UPDATE entries SET deleted=1, rev=rev+1, dirty=1, updated_at=?, device=? WHERE id=?",
                       (time.time(), self.device_id, entry_id))
         self._notify()
+
+    def count_open(self, category: Optional[str] = None) -> int:
+        sql = "SELECT COUNT(*) FROM entries WHERE deleted=0 AND status='open'"
+        args = []
+        if category:
+            sql += " AND category=?"
+            args.append(category)
+        with closing(self._conn()) as c:
+            return c.execute(sql, args).fetchone()[0]
+
+    def open_uids(self) -> set:
+        with closing(self._conn()) as c:
+            return {r["uid"] for r in c.execute("SELECT uid FROM entries WHERE deleted=0 AND status='open'")}
 
     def all_entries(self) -> list:
         with closing(self._conn()) as c:
@@ -241,6 +266,9 @@ class Database:
             c.execute("UPDATE entries SET dirty=0 WHERE uid=? AND rev=?", (uid, rev))
 
     def upsert_remote(self, uid: str, rec: dict):
+        rec = dict(rec)
+        rec["status"] = rec.get("status") or config.STATUS_SOLVED   # 이전 버전에서 온 데이터
+        rec["deleted"] = int(rec.get("deleted") or 0)
         vals = [rec.get(k) for k in REMOTE_FIELDS]
         with closing(self._conn()) as c, c:
             row = c.execute("SELECT id FROM entries WHERE uid=?", (uid,)).fetchone()
