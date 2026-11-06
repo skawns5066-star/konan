@@ -50,6 +50,35 @@ def import_qimage(img: QImage) -> str:
     return _rel(dest)
 
 
+def import_solution_file(src: str) -> str:
+    """해결 방법 사진(파일)을 data/images/solution 으로 복사."""
+    config.SOL_DIR.mkdir(parents=True, exist_ok=True)
+    dest = config.SOL_DIR / f"{uuid.uuid4().hex}{Path(src).suffix.lower() or '.png'}"
+    shutil.copy2(src, dest)
+    return _rel(dest)
+
+
+def import_solution_qimage(img: QImage) -> str:
+    config.SOL_DIR.mkdir(parents=True, exist_ok=True)
+    dest = config.SOL_DIR / f"{uuid.uuid4().hex}.png"
+    img.save(str(dest), "PNG")
+    return _rel(dest)
+
+
+def sol_list(entry) -> list:
+    """항목의 해결 방법 사진 경로 목록."""
+    try:
+        data = json.loads((entry or {}).get("sol_images") or "[]")
+        return [r for r in data if isinstance(r, str)]
+    except ValueError:
+        return []
+
+
+def entry_files(entry) -> list:
+    """항목이 쓰는 모든 사진(문제 화면 원본/카드용 + 해결 방법 사진)."""
+    return [r for r in [(entry or {}).get("original"), (entry or {}).get("image"), *sol_list(entry)] if r]
+
+
 def save_cropped(img: QImage) -> str:
     config.CROP_DIR.mkdir(parents=True, exist_ok=True)
     dest = config.CROP_DIR / f"{uuid.uuid4().hex}.png"

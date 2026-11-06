@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS entries (
     original    TEXT,              -- 원본 사진 (data/ 기준 상대경로)
     image       TEXT,              -- 카드용 사진(크롭본)
     crop_meta   TEXT,              -- 크롭 정보(JSON)
+    sol_images  TEXT,              -- 해결 방법 사진 목록(JSON 배열, 상대경로)
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL,
     uid         TEXT,
@@ -37,7 +38,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-REMOTE_FIELDS = ("category", "title", "solution", "original", "image", "crop_meta",
+REMOTE_FIELDS = ("category", "title", "solution", "original", "image", "crop_meta", "sol_images",
                  "created_at", "updated_at", "rev", "deleted", "device")
 
 
@@ -79,7 +80,8 @@ class Database:
             cols = {r["name"] for r in c.execute("PRAGMA table_info(entries)")}
             for name, ddl in (("uid", "TEXT"), ("rev", "INTEGER NOT NULL DEFAULT 1"),
                               ("deleted", "INTEGER NOT NULL DEFAULT 0"),
-                              ("dirty", "INTEGER NOT NULL DEFAULT 1"), ("device", "TEXT")):
+                              ("dirty", "INTEGER NOT NULL DEFAULT 1"), ("device", "TEXT"),
+                              ("sol_images", "TEXT")):
                 if name not in cols:
                     c.execute(f"ALTER TABLE entries ADD COLUMN {name} {ddl}")
             for row in c.execute("SELECT id FROM entries WHERE uid IS NULL").fetchall():
@@ -184,20 +186,20 @@ class Database:
             row = c.execute("SELECT * FROM entries WHERE id=? AND deleted=0", (entry_id,)).fetchone()
         return dict(row) if row else None
 
-    def add_entry(self, category, title, solution, original, image, crop_meta=None) -> int:
+    def add_entry(self, category, title, solution, original, image, crop_meta=None, sol_images=None) -> int:
         now = time.time()
         with closing(self._conn()) as c, c:
             cur = c.execute(
-                "INSERT INTO entries(category,title,solution,original,image,crop_meta,created_at,updated_at,"
-                "uid,rev,deleted,dirty,device) VALUES(?,?,?,?,?,?,?,?,?,1,0,1,?)",
-                (category, title, solution, original, image, crop_meta, now, now,
+                "INSERT INTO entries(category,title,solution,original,image,crop_meta,sol_images,created_at,updated_at,"
+                "uid,rev,deleted,dirty,device) VALUES(?,?,?,?,?,?,?,?,?,?,1,0,1,?)",
+                (category, title, solution, original, image, crop_meta, sol_images, now, now,
                  uuid.uuid4().hex, self.device_id))
             new_id = cur.lastrowid
         self._notify()
         return new_id
 
     def update_entry(self, entry_id: int, **fields):
-        allowed = {"title", "solution", "original", "image", "crop_meta"}
+        allowed = {"title", "solution", "original", "image", "crop_meta", "sol_images"}
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
             return

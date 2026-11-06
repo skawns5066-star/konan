@@ -16,6 +16,7 @@ DB_PATH = DATA_DIR / "guide.db"
 IMG_DIR = DATA_DIR / "images"
 ORIG_DIR = IMG_DIR / "original"
 CROP_DIR = IMG_DIR / "cropped"
+SOL_DIR = IMG_DIR / "solution"      # 해결 방법에 첨부한 사진
 FONT_DIR = RES_DIR / "fonts"
 BACKUP_DIR = APP_DIR / "backups"
 
@@ -48,7 +49,7 @@ IMAGE_FILTER = "图片 (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;所
 
 
 def ensure_dirs():
-    for d in (DATA_DIR, ORIG_DIR, CROP_DIR):
+    for d in (DATA_DIR, ORIG_DIR, CROP_DIR, SOL_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 # 동기화 기본값

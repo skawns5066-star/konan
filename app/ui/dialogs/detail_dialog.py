@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton
 
 from ... import config, storage
 from ..widgets.image_widgets import ZoomView
+from ..widgets.solution_photos import SolutionGallery
 from .common import ask_password, confirm
 from .entry_dialog import EntryDialog
 
@@ -30,10 +31,13 @@ class DetailDialog(QDialog):
         split.setChildrenCollapsible(False)
         root.addWidget(split)
 
-        # 왼쪽: 확대 가능한 원본
+        # 왼쪽: 문제가 생긴 화면 (원본, 확대/이동)
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
+        cap = QLabel("问题画面")
+        cap.setObjectName("Section")
+        ll.addWidget(cap)
         self.zoom = ZoomView()
         ll.addWidget(self.zoom, 1)
         tip = QLabel("滚轮缩放 · 拖动平移 · 双击还原")
@@ -41,7 +45,7 @@ class DetailDialog(QDialog):
         ll.addWidget(tip)
         split.addWidget(left)
 
-        # 오른쪽: 제목 + 해결 방법
+        # 오른쪽: 제목 + 해결 방법(텍스트 + 사진 여러 장, 화살표로 넘김)
         right = QFrame()
         right.setObjectName("Panel")
         rl = QVBoxLayout(right)
@@ -56,7 +60,13 @@ class DetailDialog(QDialog):
         rl.addWidget(sec)
         self.solution = QTextBrowser()
         self.solution.setObjectName("Solution")
+        self.solution.setMaximumHeight(220)
         rl.addWidget(self.solution, 1)
+        self.gallery_cap = QLabel("解决方法图片（用 ◀ ▶ 或键盘方向键切换）")
+        self.gallery_cap.setObjectName("Section")
+        rl.addWidget(self.gallery_cap)
+        self.gallery = SolutionGallery()
+        rl.addWidget(self.gallery, 3)
         row = QHBoxLayout()
         b_edit = QPushButton("编辑")
         b_edit.clicked.connect(self._edit)
@@ -72,16 +82,21 @@ class DetailDialog(QDialog):
         row.addWidget(b_close)
         rl.addLayout(row)
         split.addWidget(right)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 2)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 1)
         self._fill()
 
     def _fill(self):
         e = self.entry
         self.title_lbl.setText(e["title"])
-        self.solution.setPlainText(e["solution"] or "（尚未填写解决方法）")
+        self.solution.setPlainText(e["solution"] or ("" if storage.sol_list(e) else "（尚未填写解决方法）"))
         src = e["original"] or e["image"]
         self.zoom.set_image(storage.load_qimage(src) if src else None)
+        sol = storage.sol_list(e)
+        self.gallery.set_images(sol)
+        self.gallery.setVisible(bool(sol))
+        self.gallery_cap.setVisible(bool(sol))
+        self.solution.setMaximumHeight(220 if sol else 16777215)
 
     def showEvent(self, ev):
         super().showEvent(ev)
@@ -102,7 +117,7 @@ class DetailDialog(QDialog):
             return
         if confirm(self, f"确定要删除“{self.entry['title']}”吗？\n删除后无法恢复。", "删除确认",
                    yes="删除", danger=True):
-            storage.remove_files(self.entry["original"], self.entry["image"])
+            storage.remove_files(*storage.entry_files(self.entry))
             self.db.delete_entry(self.entry["id"])
             self.was_changed = True
             self.changed.emit()

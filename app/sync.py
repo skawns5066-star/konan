@@ -58,7 +58,7 @@ def _key(rec: dict):
 
 
 def _images(rec: dict):
-    return [r for r in (rec.get("original"), rec.get("image")) if r]
+    return storage.entry_files(rec)
 
 
 # ---------------- 핵심 동기화 (Qt 비의존) ----------------
@@ -102,7 +102,7 @@ def run_sync(db, shared: str, seen: dict) -> dict:
                 src, dst = config.DATA_DIR / rel, root / rel
                 if src.is_file() and not dst.exists():
                     _copy_atomic(src, dst)
-        rec = {k: e[k] for k in ("category", "title", "solution", "original", "image", "crop_meta",
+        rec = {k: e[k] for k in ("category", "title", "solution", "original", "image", "crop_meta", "sol_images",
                                  "created_at", "updated_at", "rev", "deleted", "device")}
         rec["uid"] = e["uid"]
         _atomic_write(path, json.dumps(rec, ensure_ascii=False).encode("utf-8"))

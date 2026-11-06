@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 from .. import config, theme
 from ..sync import SyncManager
 from .card_page import CardPage
+from .dialogs.common import ask_password
 from .dialogs.settings_dialog import SettingsDialog
 from .home_page import HomePage
 
@@ -109,6 +110,8 @@ class MainWindow(QMainWindow):
 
     # ---- 설정 ----
     def open_settings(self):
+        if not ask_password(self, self.db, "进入设置需要输入密码"):
+            return
         dlg = SettingsDialog(self, self.db, self.sync)
         dlg.fontChanged.connect(lambda pt: theme.apply(QApplication.instance(), pt))
         dlg.dataReplaced.connect(self._reload_all)

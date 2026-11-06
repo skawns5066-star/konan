@@ -1,4 +1,6 @@
-"""등록/수정 창 (모든 카테고리 공통): 사진 → 크롭 편집 → 제목(번체 중국어 입력) + 해결 방법."""
+"""등록/수정 창 (모든 카테고리 공통).
+왼쪽: 문제가 생긴 화면 사진 1장(크롭) / 오른쪽: 제목 + 해결 방법(텍스트 + 사진 여러 장)."""
+import json
 from typing import Optional
 
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout
@@ -7,6 +9,7 @@ from PySide6.QtGui import QImage
 from ... import config, storage
 from ..widgets.image_picker import ImagePicker
 from ..widgets.image_widgets import PasteFilter
+from ..widgets.solution_photos import SolutionPhotoEditor
 from .common import warn
 from .crop_dialog import CropDialog
 
@@ -28,7 +31,7 @@ class EntryDialog(QDialog):
         self._crop_dirty = False
 
         self.setWindowTitle(("编辑 · " if entry else "添加 · ") + config.CATEGORY_TITLES.get(category, ""))
-        self.resize(1060, 680)
+        self.resize(1200, 760)
         self._build()
         if entry:
             self._load_existing()
@@ -39,7 +42,7 @@ class EntryDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(16)
 
-        self.picker = ImagePicker("点击此处选择图片\n或按 Ctrl+V 粘贴截图\n（也可以直接拖入图片）")
+        self.picker = ImagePicker("问题画面（1张）\n点击此处选择图片\n或按 Ctrl+V 粘贴截图\n（也可以直接拖入图片）")
         self.picker.imageChosen.connect(self._on_image)
         self.picker.error.connect(lambda m: warn(self, m))
         self.btn_recrop = QPushButton("重新裁剪")
@@ -69,6 +72,8 @@ class EntryDialog(QDialog):
         self.solution_edit.setAcceptRichText(False)
         self.solution_edit.setPlaceholderText("请输入解决方法（可多行）")
         form.addWidget(self.solution_edit, 1)
+        self.sol_editor = SolutionPhotoEditor()
+        form.addWidget(self.sol_editor)
 
         btns = QHBoxLayout()
         btns.addStretch(1)
@@ -82,9 +87,11 @@ class EntryDialog(QDialog):
         form.addLayout(btns)
 
         # 입력칸에서 Ctrl+V 로 사진 붙여넣기(클립보드에 이미지만 있을 때)
-        self._paste_filter = PasteFilter(self.picker.paste, self)
-        for w in (self.title_edit, self.solution_edit):
-            w.installEventFilter(self._paste_filter)
+        # 제목 칸 Ctrl+V → 문제 화면 사진, 해결 방법 칸 Ctrl+V → 해결 방법 사진
+        self._pf_problem = PasteFilter(self.picker.paste, self)
+        self._pf_solution = PasteFilter(self.sol_editor.paste, self)
+        self.title_edit.installEventFilter(self._pf_problem)
+        self.solution_edit.installEventFilter(self._pf_solution)
 
     def _load_existing(self):
         e = self.entry
@@ -97,6 +104,7 @@ class EntryDialog(QDialog):
         self.picker.show_image(shown)
         self._meta = storage.loads_meta(e["crop_meta"])
         self.btn_recrop.setEnabled(self._orig_img is not None and not self._orig_img.isNull())
+        self.sol_editor.set_existing(storage.sol_list(e))
 
     # ---------------- 사진 처리 ----------------
     def _on_image(self, img: QImage, path: str):
@@ -127,7 +135,7 @@ class EntryDialog(QDialog):
         title = self.title_edit.text().strip()
         solution = self.solution_edit.toPlainText().strip()
         if self._orig_img is None or self._orig_img.isNull():
-            warn(self, "请先添加图片。")
+            warn(self, "请先添加问题画面图片。")
             return
         if not title:
             warn(self, "请输入标题。")
@@ -148,12 +156,24 @@ class EntryDialog(QDialog):
             to_remove.append(old.get("image"))
             image_rel = storage.save_cropped(self._card_img)
 
+        # 해결 방법 사진: 기존 것은 유지, 새로 추가한 것은 복사, 목록에서 빠진 것은 삭제
+        new_sol = []
+        for it in self.sol_editor.items():
+            if it["rel"]:
+                new_sol.append(it["rel"])
+            elif it["src"]:
+                new_sol.append(storage.import_solution_file(it["src"]))
+            else:
+                new_sol.append(storage.import_solution_qimage(it["img"]))
+        to_remove += [r for r in storage.sol_list(old) if r not in new_sol]
+        sol_json = json.dumps(new_sol) if new_sol else None
+
         meta = storage.dumps_meta(self._meta)
         if self.entry:
             self.db.update_entry(self.entry["id"], title=title, solution=solution,
-                                 original=orig_rel, image=image_rel, crop_meta=meta)
+                                 original=orig_rel, image=image_rel, crop_meta=meta, sol_images=sol_json)
             self.saved_id = self.entry["id"]
         else:
-            self.saved_id = self.db.add_entry(self.category, title, solution, orig_rel, image_rel, meta)
-        storage.remove_files(*[r for r in to_remove if r and r not in (orig_rel, image_rel)])
+            self.saved_id = self.db.add_entry(self.category, title, solution, orig_rel, image_rel, meta, sol_json)
+        storage.remove_files(*[r for r in to_remove if r and r not in (orig_rel, image_rel, *new_sol)])
         self.accept()
