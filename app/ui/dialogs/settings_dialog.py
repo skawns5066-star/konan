@@ -1,7 +1,7 @@
 """설정: 글자 크기, 카드 비율, 비밀번호, 백업/복원."""
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QLineEdit, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QPushButton, QSlider, QVBoxLayout)
 
 import time
@@ -15,9 +15,10 @@ class SettingsDialog(QDialog):
     dataReplaced = Signal()
     ratioChanged = Signal()
 
-    def __init__(self, parent, db):
+    def __init__(self, parent, db, sync):
         super().__init__(parent)
         self.db = db
+        self.sync = sync
         self.setWindowTitle("设置")
         self.setMinimumWidth(560)
         lay = QVBoxLayout(self)
@@ -43,7 +44,7 @@ class SettingsDialog(QDialog):
         lay.addLayout(row)
 
         # 카드 비율
-        lay.addWidget(self._section("检测程序PC：图片卡片比例"))
+        lay.addWidget(self._section("图片卡片比例（所有PC共用）"))
         row = QHBoxLayout()
         self.ratio = QComboBox()
         for k in config.RATIOS:
@@ -60,6 +61,38 @@ class SettingsDialog(QDialog):
         b_pw = QPushButton("修改密码…")
         b_pw.clicked.connect(lambda: ChangePasswordDialog(self, self.db).exec())
         lay.addWidget(b_pw, 0, Qt.AlignLeft)
+
+        # 동기화
+        lay.addWidget(self._section("多台PC数据同步（共享文件夹）"))
+        row = QHBoxLayout()
+        self.path_edit = QLineEdit(db.get_setting("sync_path"))
+        self.path_edit.setPlaceholderText(r"例如 \\NAS\guide  或  Z:\guide  （所有PC填写相同路径）")
+        b_browse = QPushButton("浏览…")
+        b_browse.clicked.connect(self._browse)
+        row.addWidget(self.path_edit, 1)
+        row.addWidget(b_browse)
+        lay.addLayout(row)
+        row = QHBoxLayout()
+        self.auto_chk = QCheckBox("自动同步")
+        self.auto_chk.setChecked(db.get_setting("sync_auto", "1") == "1")
+        self.interval = QComboBox()
+        for sec in config.SYNC_INTERVALS:
+            self.interval.addItem(f"每 {sec} 秒检查", sec)
+        cur = int(db.get_setting("sync_interval", str(config.DEFAULT_SYNC_INTERVAL)) or 10)
+        idx = self.interval.findData(cur)
+        self.interval.setCurrentIndex(idx if idx >= 0 else 1)
+        b_apply = QPushButton("应用并立即同步")
+        b_apply.setObjectName("Primary")
+        b_apply.clicked.connect(self._apply_sync)
+        row.addWidget(self.auto_chk)
+        row.addWidget(self.interval)
+        row.addStretch(1)
+        row.addWidget(b_apply)
+        lay.addLayout(row)
+        self.sync_status = QLabel(sync.last_text)
+        self.sync_status.setWordWrap(True)
+        sync.status.connect(self._on_status)
+        lay.addWidget(self.sync_status)
 
         # 백업
         lay.addWidget(self._section("数据备份"))
@@ -90,6 +123,29 @@ class SettingsDialog(QDialog):
         l.setObjectName("Section")
         return l
 
+    def _browse(self):
+        path = QFileDialog.getExistingDirectory(self, "选择共享文件夹", self.path_edit.text())
+        if path:
+            self.path_edit.setText(path)
+
+    def _on_status(self, _state, text):
+        self.sync_status.setText(text)
+
+    def _apply_sync(self):
+        self.db.set_setting("sync_path", self.path_edit.text().strip())
+        self.db.set_setting("sync_auto", "1" if self.auto_chk.isChecked() else "0")
+        self.db.set_setting("sync_interval", str(self.interval.currentData()))
+        self.sync.configure()
+        if not self.auto_chk.isChecked():
+            self.sync.sync_now(manual=True)
+
+    def done(self, r):
+        try:
+            self.sync.status.disconnect(self._on_status)
+        except (RuntimeError, TypeError):
+            pass
+        super().done(r)
+
     def _on_font(self, v):
         self.size_lbl.setText(f"{v} pt")
         self.db.set_setting("font_pt", str(v))
@@ -100,7 +156,7 @@ class SettingsDialog(QDialog):
         old_key = self.db.card_ratio_key
         if new_key == old_key:
             return
-        self.db.set_setting("card_ratio", new_key)
+        self.db.set_card_ratio(new_key)
         n = storage.regenerate_cards(self.db, config.RATIOS[old_key], config.RATIOS[new_key])
         self.ratioChanged.emit()
         info(self, f"卡片比例已改为 {new_key}。\n已重新生成 {n} 张图片。")
@@ -136,4 +192,5 @@ class SettingsDialog(QDialog):
         self.ratio.setCurrentText(self.db.card_ratio_key)
         self.fontChanged.emit(self.db.font_pt)
         self.dataReplaced.emit()
+        self.sync.configure()
         info(self, "导入完成。")

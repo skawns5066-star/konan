@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 class PageHeader(QWidget):
-    """[← 首页]  제목  ......  [＋ 添加]"""
+    """[← 首页]  제목  ......  동기화 상태 [⟳ 同步] [＋ 添加]"""
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
@@ -13,10 +13,14 @@ class PageHeader(QWidget):
         self.back.setObjectName("Flat")
         self.title = QLabel(title)
         self.title.setObjectName("Title")
+        self.sync_lbl = QLabel("")
+        self.sync = QPushButton("⟳  同步")
         self.add = QPushButton("＋  添加")
         self.add.setObjectName("Primary")
         lay.addWidget(self.back)
         lay.addSpacing(8)
         lay.addWidget(self.title)
         lay.addStretch(1)
+        lay.addWidget(self.sync_lbl)
+        lay.addWidget(self.sync)
         lay.addWidget(self.add)

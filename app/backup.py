@@ -33,6 +33,7 @@ def _safe_members(z: zipfile.ZipFile):
 
 def import_zip(src: str, db):
     """zip 의 내용으로 현재 데이터를 교체한다. 교체 전 자동 백업을 backups/ 에 남긴다."""
+    keep = {k: db.get_setting(k) for k in ("device_id", "sync_path", "sync_auto", "sync_interval", "font_pt")}
     with zipfile.ZipFile(src) as z:
         names = _safe_members(z)
         if "guide.db" not in names:
@@ -49,3 +50,7 @@ def import_zip(src: str, db):
             shutil.copy2(tmp / "guide.db", config.DB_PATH)
     config.ensure_dirs()
     db.init()
+    for k, v in keep.items():     # 이 PC 고유 설정(PC id, 공유폴더 경로 등)은 백업에 덮어쓰이지 않게 유지
+        if v:
+            db.set_setting(k, v)
+    db.mark_all_dirty()           # 공유 폴더가 있으면 가져온 내용이 다른 PC에도 반영되도록

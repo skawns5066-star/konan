@@ -90,7 +90,7 @@ class DetailDialog(QDialog):
     def _edit(self):
         if not ask_password(self, self.db, "编辑需要输入密码"):
             return
-        dlg = EntryDialog(self, self.db, config.CATEGORY_INSPECT, self.entry)
+        dlg = EntryDialog(self, self.db, self.entry["category"], self.entry)
         if dlg.exec() == QDialog.Accepted:
             self.entry = self.db.get_entry(self.entry["id"])
             self.was_changed = True

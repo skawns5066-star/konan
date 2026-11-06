@@ -1,4 +1,4 @@
-"""검사프로그램 PC 문제 화면: 3x2 사진 카드(창을 가득 채움) + 페이지 넘김."""
+"""사진 카드 화면(4개 카테고리 공통): 3x2 카드가 창을 가득 채움 + 페이지 넘김."""
 from typing import List, Optional
 
 from PySide6.QtCore import QRect, Qt, Signal
@@ -11,7 +11,6 @@ from .dialogs.entry_dialog import EntryDialog
 from .widgets.image_widgets import ScaledImageLabel
 from .widgets.page_header import PageHeader
 
-CAT = config.CATEGORY_INSPECT
 COLS, ROWS = 3, 2
 PAD = 8
 
@@ -123,12 +122,13 @@ class CardGrid(QWidget):
             card.layout_children(self.ratio, title_h)
 
 
-class InspectPage(QWidget):
+class CardPage(QWidget):
     goHome = Signal()
 
-    def __init__(self, db, parent=None):
+    def __init__(self, db, category: str, title: str, parent=None):
         super().__init__(parent)
         self.db = db
+        self.category = category
         self.setObjectName("Page")
         self._page = 0
         self._entries: List[dict] = []
@@ -137,7 +137,7 @@ class InspectPage(QWidget):
         root.setContentsMargins(24, 18, 24, 14)
         root.setSpacing(10)
 
-        self.header = PageHeader("检测程序PC问题")
+        self.header = PageHeader(title)
         self.header.back.clicked.connect(self.goHome)
         self.header.add.clicked.connect(self._add)
         root.addWidget(self.header)
@@ -179,7 +179,7 @@ class InspectPage(QWidget):
 
     def refresh(self):
         self.grid.set_ratio(self.db.card_ratio)
-        self._entries = self.db.list_entries(CAT, self.search.text())
+        self._entries = self.db.list_entries(self.category, self.search.text())
         self._page = min(self._page, self.pages() - 1)
         self._render()
 
@@ -205,7 +205,7 @@ class InspectPage(QWidget):
         self.page_lbl.setText(f"{self._page + 1 if self._entries else 0} / {total}")
         self.prev.setEnabled(self._page > 0)
         self.next.setEnabled(self._page < self.pages() - 1)
-        all_n = len(self.db.list_entries(CAT))
+        all_n = len(self.db.list_entries(self.category))
         self.count_lbl.setText(f"共 {all_n} 条")
 
     # ---------------- 동작 ----------------
@@ -219,7 +219,7 @@ class InspectPage(QWidget):
             self.refresh()
 
     def _add(self):
-        dlg = EntryDialog(self, self.db, CAT)
+        dlg = EntryDialog(self, self.db, self.category)
         if dlg.exec() == QDialog.Accepted:
             self.search.blockSignals(True)
             self.search.clear()

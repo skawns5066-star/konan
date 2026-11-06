@@ -4,7 +4,6 @@ REM 사전 준비:  pip install -r requirements.txt pyinstaller
 chcp 65001 >nul
 pyinstaller --noconfirm --clean --windowed --name EquipmentGuide ^
   --add-data "fonts;fonts" ^
-  --collect-all rapidocr_onnxruntime ^
   main.py
 echo.
 echo 완료: dist\EquipmentGuide\EquipmentGuide.exe

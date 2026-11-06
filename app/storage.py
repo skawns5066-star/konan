@@ -132,7 +132,7 @@ def regenerate_cards(db, old_ratio: float, new_ratio: float) -> int:
     """카드 비율 설정이 바뀌면 보관된 원본에서 카드용 사진을 다시 만든다."""
     count = 0
     for e in db.all_entries():
-        if e["category"] != config.CATEGORY_INSPECT or not e["original"]:
+        if not e["original"]:
             continue
         meta = loads_meta(e["crop_meta"])
         if not meta:
