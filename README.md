@@ -57,12 +57,14 @@ build_exe.bat      exe 빌드 스크립트
    ```
 
 ## 다른 PC에서 Python 없이 실행 (.exe 빌드)
-Windows 에서:
-```
-pip install -r requirements.txt pyinstaller
-build_exe.bat
-```
-`dist\EquipmentGuide\` 폴더를 통째로 USB 등으로 옮기면 Python/인터넷 없이 `EquipmentGuide.exe` 로 실행됩니다. 데이터(`data/`)는 exe 옆에 저장되므로 **폴더째 복사 = 백업/이전** 입니다.
+Windows 에서 (Python 3.10 이상 설치되어 있어야 함, 빌드하는 PC 1대만 필요):
+1. 프로젝트 폴더에서 `build_exe.bat` 를 **더블클릭** (또는 명령 프롬프트에서 `build_exe.bat`)
+   - 라이브러리 설치 → exe 빌드까지 자동으로 진행됩니다 (수 분 소요, 인터넷 필요)
+2. 완료되면 `dist\EquipmentGuide\EquipmentGuide.exe` 가 생성됩니다.
+3. `dist\EquipmentGuide` 폴더를 **통째로** USB 등으로 다른 PC에 복사하면 Python/인터넷 없이 실행됩니다.
+
+데이터(`data/`)는 exe 옆에 저장되므로 **폴더째 복사 = 백업/이전** 입니다.
+(배치 파일은 한글이 있으면 cmd 에서 깨지므로 영문으로만 작성되어 있습니다.)
 
 ## 백업 / 이전
 - 가장 간단한 방법: **프로그램 폴더(특히 `data/`)를 통째로 복사**

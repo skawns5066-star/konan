@@ -1,11 +1,29 @@
 @echo off
-REM Windows 에서 실행: Python 없이 돌아가는 exe(폴더) 빌드
-REM 사전 준비:  pip install -r requirements.txt pyinstaller
-chcp 65001 >nul
-pyinstaller --noconfirm --clean --windowed --name EquipmentGuide ^
-  --add-data "fonts;fonts" ^
-  main.py
+REM ============================================================
+REM  Build a standalone Windows exe (no Python needed on target PCs)
+REM  Run this file on a Windows PC that has Python 3.10+ installed.
+REM ============================================================
+cd /d "%~dp0"
+
+echo [1/3] Installing libraries...
+python -m pip install -r requirements.txt pyinstaller
+if errorlevel 1 goto :error
+
+echo [2/3] Building exe (takes a few minutes)...
+python -m PyInstaller --noconfirm --clean --windowed --name EquipmentGuide --add-data "fonts;fonts" main.py
+if errorlevel 1 goto :error
+
+echo [3/3] Done.
 echo.
-echo 완료: dist\EquipmentGuide\EquipmentGuide.exe
-echo 이 폴더(dist\EquipmentGuide)를 통째로 다른 PC에 복사하면 됩니다. data 폴더는 첫 실행 때 exe 옆에 생성됩니다.
+echo Output folder: %~dp0dist\EquipmentGuide
+echo Run:           dist\EquipmentGuide\EquipmentGuide.exe
+echo Copy the whole "dist\EquipmentGuide" folder to other PCs (USB etc.).
+echo The "data" folder is created next to the exe on first run.
 pause
+exit /b 0
+
+:error
+echo.
+echo BUILD FAILED. Check that Python is installed and "python" works in this window.
+pause
+exit /b 1
