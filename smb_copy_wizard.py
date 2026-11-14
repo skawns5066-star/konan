@@ -12,6 +12,7 @@ import os
 import queue
 import re
 import shutil
+import stat
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -56,8 +57,8 @@ def inspect_dir(ip):
     return rf"\\{ip}\{share}\{sub}"
 
 
-def latest_revision(parent_dir, model):
-    """parent_dir 안에서 <모델명>-NN 폴더 중 번호가 가장 큰 폴더 이름을 반환 (없으면 None).
+def list_revisions(parent_dir, model):
+    """parent_dir 안의 <모델명>-NN 폴더 이름을 번호 오름차순으로 반환.
 
     목록을 읽지 못하면 OSError 발생.
     """
@@ -67,7 +68,24 @@ def latest_revision(parent_dir, model):
         m = pattern.match(name)
         if m and os.path.isdir(os.path.join(parent_dir, name)):
             found.append((int(m.group(1)), name))
-    return max(found)[1] if found else None
+    return [name for _, name in sorted(found)]
+
+
+def latest_revision(parent_dir, model):
+    """가장 번호가 큰 <모델명>-NN 폴더 이름 (없으면 None)."""
+    revs = list_revisions(parent_dir, model)
+    return revs[-1] if revs else None
+
+
+def _clear_readonly(func, path, _exc):
+    """읽기 전용 파일 때문에 삭제가 막히면 속성을 풀고 다시 시도."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def remove_dir(path):
+    """폴더를 통째로 영구 삭제 (휴지통 사용 안 함)."""
+    shutil.rmtree(path, onerror=_clear_readonly)
 
 
 def copy_item(src, dst):
@@ -117,6 +135,8 @@ class Wizard(tk.Tk):
         self.src_var = tk.StringVar()
         self.dst_vars = [tk.BooleanVar(value=False) for _ in PCS]
         self.log_queue = queue.Queue()
+        self.del_var = tk.BooleanVar(value=True)
+        self.delete_old = True
         self.log_path = make_log_file()
         self.answer = threading.Event()
         self.answer_yes = False
@@ -169,6 +189,9 @@ class Wizard(tk.Tk):
         for k in ITEMS:
             ttk.Checkbutton(f, text=k, variable=self.item_vars[k]).pack(anchor="w", padx=12)
 
+        ttk.Checkbutton(f, text="복사 후 INSPECT_SPEC의 이전 번호 폴더 삭제 (원본·대상 모두 가장 높은 번호만 남김)",
+                        variable=self.del_var).pack(anchor="w", pady=(8, 0))
+
         ttk.Label(f, text="원본 PC").pack(anchor="w", pady=(10, 0))
         cb = ttk.Combobox(f, textvariable=self.src_var, state="readonly", width=34,
                           values=[pc_label(p) for p in PCS])
@@ -189,6 +212,7 @@ class Wizard(tk.Tk):
             return messagebox.showwarning("입력 확인", "원본 PC를 선택하세요.")
 
         self.model, self.items, self.src_pc = model, items, PCS[idx]
+        self.delete_old = self.del_var.get() and "INSPECT_SPEC" in items
         # Step 2: 1차 확인
         msg = f"{pc_label(self.src_pc)}의 [{', '.join(items)}] 항목을 복사하시겠습니까?"
         if messagebox.askyesno("1차 확인", msg):
@@ -287,12 +311,37 @@ class Wizard(tk.Tk):
                              os.path.join(inspect_dir(pc[1]), dst_name), None))
         return plan
 
+    def make_deletions(self, plan):
+        """삭제 예정 목록: (PC, 상위 폴더, [이전 번호 폴더 이름]).
+
+        원본은 복사한 폴더, 대상은 덮어쓴 폴더(= 가장 높은 번호)만 남기고 나머지를 삭제한다.
+        """
+        result, seen = [], set()
+        for pc, item, src, dst, err in plan:
+            if item != "INSPECT_SPEC" or err:
+                continue
+            for owner, keep_path in ((self.src_pc, src), (pc, dst)):
+                if owner[1] in seen:
+                    continue
+                seen.add(owner[1])
+                parent = inspect_dir(owner[1])
+                keep = os.path.basename(keep_path.replace("\\", os.sep))
+                try:
+                    old = [n for n in list_revisions(parent, self.model) if n.lower() != keep.lower()]
+                except OSError as e:
+                    self.log("warn", f"[경고] {pc_label(owner)} 삭제 대상 목록을 읽지 못했습니다: {e}")
+                    continue
+                if old:
+                    result.append((owner, parent, old))
+        return result
+
     def run_copy(self):
         self.log("info", "=" * 50)
         self.log("info", f"복사 시작 | 모델명: {self.model} | 원본: {pc_label(self.src_pc)}")
         self.log("info", f"항목: {', '.join(self.items)} | 대상: {', '.join(pc_label(t) for t in self.targets)}")
 
         plan = self.make_plan()
+        deletions = []
         if "INSPECT_SPEC" in self.items:
             lines = []
             for pc, item, src, dst, err in plan:
@@ -307,11 +356,18 @@ class Wizard(tk.Tk):
                     text = f"{pc_label(pc)}: 원본 {sname} -> 대상 {dname}{new}"
                     self.log("info", f"[계획] INSPECT_SPEC {text}")
                 lines.append("- " + text)
+            deletions = self.make_deletions(plan) if self.delete_old else []
+            for pc, parent, names in deletions:
+                self.log("warn", f"[계획] 삭제 예정 {pc_label(pc)} {parent}: {', '.join(names)}")
+            warn_del = ""
+            if deletions:
+                warn_del = ("\n\n[복사가 모두 성공한 뒤 아래 이전 번호 폴더를 삭제합니다 - 복구할 수 없습니다]\n"
+                            + "\n".join(f"- {pc_label(pc)}: {', '.join(names)}" for pc, _, names in deletions))
             self.answer.clear()
             self.log_queue.put(("ask", (
                 "INSPECT_SPEC 복사 폴더 확인",
                 "INSPECT_SPEC은 원본의 가장 높은 번호 폴더를 대상의 가장 높은 번호 폴더에 덮어씁니다.\n\n"
-                + "\n".join(lines) + "\n\n이대로 복사를 진행할까요?")))
+                + "\n".join(lines) + warn_del + "\n\n이대로 진행할까요?")))
             self.answer.wait()
             if not self.answer_yes:
                 self.log("warn", "[취소] 복사 폴더 확인에서 사용자가 복사를 취소했습니다.")
@@ -319,9 +375,12 @@ class Wizard(tk.Tk):
                 return
 
         ok = fail = 0
+        failed_pcs = set()  # INSPECT_SPEC 복사에 실패한 PC (이 PC는 삭제하지 않음)
         for pc, item, src, dst, err in plan:
             if err:
                 fail += 1
+                if item == "INSPECT_SPEC":
+                    failed_pcs.add(pc[1])
                 self.log("fail", f"[실패] {item}: {pc_label(pc)} - 원인: {err}")
                 continue
             try:
@@ -330,7 +389,26 @@ class Wizard(tk.Tk):
                 self.log("ok", f"[성공] {item}: {src} -> {dst}")
             except Exception as e:  # noqa: BLE001 - 원인을 그대로 로그에 남김
                 fail += 1
+                if item == "INSPECT_SPEC":
+                    failed_pcs.add(pc[1])
                 self.log("fail", f"[실패] {item}: {src} -> {dst} - 원인: {describe_error(e)}")
+
+        if self.delete_old and deletions:
+            for pc, parent, names in deletions:
+                is_source = pc[1] == self.src_pc[1]
+                # 원본은 INSPECT_SPEC 복사가 하나라도 실패했으면 삭제하지 않는다.
+                if (is_source and failed_pcs) or (not is_source and pc[1] in failed_pcs):
+                    self.log("warn", f"[삭제 건너뜀] {pc_label(pc)} - INSPECT_SPEC 복사 실패가 있어 삭제하지 않았습니다.")
+                    continue
+                for name in names:
+                    path = os.path.join(parent, name)
+                    try:
+                        remove_dir(path)
+                        ok += 1
+                        self.log("ok", f"[삭제] {pc_label(pc)}: {path}")
+                    except Exception as e:  # noqa: BLE001
+                        fail += 1
+                        self.log("fail", f"[삭제 실패] {pc_label(pc)}: {path} - 원인: {describe_error(e)}")
         self.log("info", "=" * 50)
         self.log_queue.put(("done", f"완료: 성공 {ok}건, 실패 {fail}건"))
         self.log("info", f"완료: 성공 {ok}건, 실패 {fail}건")
