@@ -131,6 +131,7 @@ class Wizard(tk.Tk):
         self.minsize(600, 500)
 
         self.model_var = tk.StringVar()
+        self.dst_model_var = tk.StringVar()
         self.item_vars = {k: tk.BooleanVar(value=False) for k in ITEMS}
         self.src_var = tk.StringVar()
         self.dst_vars = [tk.BooleanVar(value=False) for _ in PCS]
@@ -143,7 +144,8 @@ class Wizard(tk.Tk):
 
         self.src_pc = None
         self.items = []
-        self.model = ""
+        self.model = ""      # 원본 모델명
+        self.dst_model = ""  # 대상 모델명 (원본과 같으면 동일 모델명 복사)
         self.targets = []
 
         self.header = ttk.Label(self, font=("Malgun Gothic", 13, "bold"))
@@ -182,8 +184,10 @@ class Wizard(tk.Tk):
     def show_step1(self):
         self.reset_view("[Step 1] 모델명 입력 및 원본 선택")
         f = self.body
-        ttk.Label(f, text="모델명 (예: 7M70-011, '-00'은 입력하지 않습니다)").pack(anchor="w")
-        ttk.Entry(f, textvariable=self.model_var, width=30).pack(anchor="w", pady=(2, 10))
+        ttk.Label(f, text="원본 모델명 (예: 7P05-T33, '-00'은 입력하지 않습니다)").pack(anchor="w")
+        ttk.Entry(f, textvariable=self.model_var, width=30).pack(anchor="w", pady=(2, 6))
+        ttk.Label(f, text="대상 모델명 (다른 모델로 복사할 때만 입력, 예: 7P05-R96 / 비우면 원본과 동일)").pack(anchor="w")
+        ttk.Entry(f, textvariable=self.dst_model_var, width=30).pack(anchor="w", pady=(2, 10))
 
         ttk.Label(f, text="복사할 항목").pack(anchor="w")
         for k in ITEMS:
@@ -200,21 +204,24 @@ class Wizard(tk.Tk):
 
     def on_step1_next(self):
         model = self.model_var.get().strip()
+        dst_model = self.dst_model_var.get().strip() or model
         items = [k for k, v in self.item_vars.items() if v.get()]
         idx = next((i for i, p in enumerate(PCS) if pc_label(p) == self.src_var.get()), None)
         if not model:
             return messagebox.showwarning("입력 확인", "모델명을 입력하세요.")
-        if any(c in model for c in '\\/:*?"<>|'):
+        if any(c in name for name in (model, dst_model) for c in '\\/:*?"<>|'):
             return messagebox.showwarning("입력 확인", "모델명에 사용할 수 없는 문자가 있습니다.")
         if not items:
             return messagebox.showwarning("입력 확인", "복사할 항목을 하나 이상 선택하세요.")
         if idx is None:
             return messagebox.showwarning("입력 확인", "원본 PC를 선택하세요.")
 
-        self.model, self.items, self.src_pc = model, items, PCS[idx]
+        self.model, self.dst_model, self.items, self.src_pc = model, dst_model, items, PCS[idx]
         self.delete_old = self.del_var.get() and "INSPECT_SPEC" in items
         # Step 2: 1차 확인
         msg = f"{pc_label(self.src_pc)}의 [{', '.join(items)}] 항목을 복사하시겠습니까?"
+        if dst_model != model:
+            msg += f"\n\n모델명: {model} -> {dst_model}"
         if messagebox.askyesno("1차 확인", msg):
             self.show_step3()
 
@@ -240,7 +247,7 @@ class Wizard(tk.Tk):
         targets = [p for p, v in zip(PCS, self.dst_vars) if v.get()]
         if not targets:
             return messagebox.showwarning("입력 확인", "대상 PC를 하나 이상 선택하세요.")
-        if self.src_pc in targets:
+        if self.src_pc in targets and self.dst_model == self.model:
             if not messagebox.askyesno("확인", "원본 PC가 대상에 포함되어 있습니다.\n"
                                               "원본 PC는 복사에서 제외됩니다. 계속할까요?"):
                 return
@@ -296,17 +303,17 @@ class Wizard(tk.Tk):
             for item in self.items:
                 if item != "INSPECT_SPEC":
                     plan.append((pc, item, build_path(self.src_pc[1], item, self.model),
-                                 build_path(pc[1], item, self.model), None))
+                                 build_path(pc[1], item, self.dst_model), None))
                     continue
                 if src_err:
                     plan.append((pc, item, None, None, src_err))
                     continue
                 try:
-                    dst_name = latest_revision(inspect_dir(pc[1]), self.model)
+                    dst_name = latest_revision(inspect_dir(pc[1]), self.dst_model)
                 except OSError as e:
                     plan.append((pc, item, None, None, f"대상 폴더 목록을 읽지 못했습니다: {e}"))
                     continue
-                dst_name = dst_name or f"{self.model}-00"
+                dst_name = dst_name or f"{self.dst_model}-00"
                 plan.append((pc, item, os.path.join(inspect_dir(self.src_pc[1]), src_name),
                              os.path.join(inspect_dir(pc[1]), dst_name), None))
         return plan
@@ -320,24 +327,25 @@ class Wizard(tk.Tk):
         for pc, item, src, dst, err in plan:
             if item != "INSPECT_SPEC" or err:
                 continue
-            for owner, keep_path in ((self.src_pc, src), (pc, dst)):
-                if owner[1] in seen:
+            for is_src, owner, keep_path, model in ((True, self.src_pc, src, self.model),
+                                                    (False, pc, dst, self.dst_model)):
+                if (owner[1], model.lower()) in seen:
                     continue
-                seen.add(owner[1])
+                seen.add((owner[1], model.lower()))
                 parent = inspect_dir(owner[1])
                 keep = os.path.basename(keep_path.replace("\\", os.sep))
                 try:
-                    old = [n for n in list_revisions(parent, self.model) if n.lower() != keep.lower()]
+                    old = [n for n in list_revisions(parent, model) if n.lower() != keep.lower()]
                 except OSError as e:
                     self.log("warn", f"[경고] {pc_label(owner)} 삭제 대상 목록을 읽지 못했습니다: {e}")
                     continue
                 if old:
-                    result.append((owner, parent, old))
+                    result.append((owner, parent, old, is_src))
         return result
 
     def run_copy(self):
         self.log("info", "=" * 50)
-        self.log("info", f"복사 시작 | 모델명: {self.model} | 원본: {pc_label(self.src_pc)}")
+        self.log("info", f"복사 시작 | 모델명: {self.model} -> {self.dst_model} | 원본: {pc_label(self.src_pc)}")
         self.log("info", f"항목: {', '.join(self.items)} | 대상: {', '.join(pc_label(t) for t in self.targets)}")
 
         plan = self.make_plan()
@@ -357,12 +365,12 @@ class Wizard(tk.Tk):
                     self.log("info", f"[계획] INSPECT_SPEC {text}")
                 lines.append("- " + text)
             deletions = self.make_deletions(plan) if self.delete_old else []
-            for pc, parent, names in deletions:
+            for pc, parent, names, _ in deletions:
                 self.log("warn", f"[계획] 삭제 예정 {pc_label(pc)} {parent}: {', '.join(names)}")
             warn_del = ""
             if deletions:
                 warn_del = ("\n\n[복사가 모두 성공한 뒤 아래 이전 번호 폴더를 삭제합니다 - 복구할 수 없습니다]\n"
-                            + "\n".join(f"- {pc_label(pc)}: {', '.join(names)}" for pc, _, names in deletions))
+                            + "\n".join(f"- {pc_label(pc)}: {', '.join(names)}" for pc, _, names, _ in deletions))
             self.answer.clear()
             self.log_queue.put(("ask", (
                 "INSPECT_SPEC 복사 폴더 확인",
@@ -394,8 +402,7 @@ class Wizard(tk.Tk):
                 self.log("fail", f"[실패] {item}: {src} -> {dst} - 원인: {describe_error(e)}")
 
         if self.delete_old and deletions:
-            for pc, parent, names in deletions:
-                is_source = pc[1] == self.src_pc[1]
+            for pc, parent, names, is_source in deletions:
                 # 원본은 INSPECT_SPEC 복사가 하나라도 실패했으면 삭제하지 않는다.
                 if (is_source and failed_pcs) or (not is_source and pc[1] in failed_pcs):
                     self.log("warn", f"[삭제 건너뜀] {pc_label(pc)} - INSPECT_SPEC 복사 실패가 있어 삭제하지 않았습니다.")
